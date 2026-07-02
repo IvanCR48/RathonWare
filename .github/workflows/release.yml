@@ -1,0 +1,65 @@
+name: Build and Release Installer
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set up MSVC Developer Command Prompt
+      uses: ilammy/msvc-dev-cmd@v1
+
+    - name: Install Qt 6
+      uses: jurplel/install-qt-action@v3
+      with:
+        version: '6.6.3'
+        host: 'windows'
+        target: 'desktop'
+        arch: 'win64_msvc2019_64' # Standard MSVC 64-bit architecture
+        modules: 'qtquick3d' # Optional modules if needed, but core Quick is default
+
+    - name: Configure CMake
+      run: |
+        cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release
+
+    - name: Build Application
+      run: |
+        cmake --build build --config Release
+
+    - name: Package Dependencies (windeployqt)
+      run: |
+        mkdir dist
+        # Check where CMake outputted the executable and copy it
+        if (Test-Path "build\Release\RathonWare.exe") {
+          copy build\Release\RathonWare.exe dist\
+        } elseif (Test-Path "build\src\Release\RathonWare.exe") {
+          copy build\src\Release\RathonWare.exe dist\
+        } else {
+          Write-Error "Could not find compiled RathonWare.exe"
+        }
+        
+        # Run windeployqt to copy Qt DLLs and plugins
+        windeployqt --qmldir qml dist\RathonWare.exe
+      shell: powershell
+
+    - name: Build Installer (Inno Setup)
+      run: |
+        iscc installer.iss
+
+    - name: Create Release and Upload Asset
+      uses: softprops/action-gh-release@v2
+      with:
+        files: build/RathonWareSetup.exe
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

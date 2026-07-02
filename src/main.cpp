@@ -1,6 +1,7 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QIcon>
 #include "system_monitor.h"
 #include "process_model.h"
 
@@ -11,6 +12,7 @@ int main(int argc, char *argv[])
 
     QGuiApplication app(argc, argv);
 
+    app.setWindowIcon(QIcon(":/RathonWare/assets/logo.png"));
     app.setOrganizationName("Rathon");
     app.setApplicationName("RathonWare");
 

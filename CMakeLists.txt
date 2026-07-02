@@ -45,6 +45,8 @@ qt_add_qml_module(RathonWare
     URI RathonWare
     VERSION 1.0
     QML_FILES ${QML_FILES}
+    RESOURCES
+        assets/logo.png
 )
 
 # Windows specific library linkings
