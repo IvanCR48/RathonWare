@@ -1,0 +1,32 @@
+# Qt Creator / CMake build directories
+build/
+build-*/
+.qtcreator/
+*.user
+*.user.user
+*.user.gdb
+*.active
+
+# Compiled binaries and object files
+*.o
+*.obj
+*.exe
+*.dll
+*.pdb
+*.lib
+*.a
+*.so
+*.dylib
+
+# Visual Studio / VS Code temp files
+.vs/
+.vscode/
+.idea/
+*.suo
+*.userossc
+*.sln.docstates
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
