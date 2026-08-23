@@ -17,21 +17,19 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
 
-    - name: Set up MSVC Developer Command Prompt
-      uses: ilammy/msvc-dev-cmd@v1
-
     - name: Install Inno Setup
       run: |
         choco install innosetup --no-progress
       shell: powershell
 
-    - name: Install Qt 6
+    - name: Install Qt 6 (MinGW 64-bit)
       uses: jurplel/install-qt-action@v3
       with:
         version: '6.6.3'
         host: 'windows'
         target: 'desktop'
-        arch: 'win64_msvc2019_64'
+        arch: 'win64_mingw'
+        tools: 'tools_mingw1120'
 
     - name: Configure CMake
       run: |
@@ -46,11 +44,7 @@ jobs:
     - name: Package Dependencies (windeployqt)
       run: |
         mkdir dist
-        if (Test-Path "build\RathonWare.exe") {
-          copy build\RathonWare.exe dist\
-        } elseif (Test-Path "build\Release\RathonWare.exe") {
-          copy build\Release\RathonWare.exe dist\
-        }
+        copy build\RathonWare.exe dist\
         windeployqt --qmldir qml dist\RathonWare.exe
       shell: powershell
 
