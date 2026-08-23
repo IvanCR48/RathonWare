@@ -20,46 +20,54 @@ jobs:
     - name: Set up MSVC Developer Command Prompt
       uses: ilammy/msvc-dev-cmd@v1
 
+    - name: Install Inno Setup
+      run: |
+        choco install innosetup --no-progress
+      shell: powershell
+
     - name: Install Qt 6
       uses: jurplel/install-qt-action@v3
       with:
         version: '6.6.3'
         host: 'windows'
         target: 'desktop'
-        arch: 'win64_msvc2019_64' # Standard MSVC 64-bit architecture
-        modules: 'qtquick3d' # Optional modules if needed, but core Quick is default
+        arch: 'win64_msvc2019_64'
 
     - name: Configure CMake
       run: |
-        cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release
+        cmake -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$env:Qt6_DIR"
+      shell: powershell
 
     - name: Build Application
       run: |
         cmake --build build --config Release
+      shell: powershell
 
     - name: Package Dependencies (windeployqt)
       run: |
         mkdir dist
-        # Check where CMake outputted the executable and copy it
-        if (Test-Path "build\Release\RathonWare.exe") {
+        if (Test-Path "build\RathonWare.exe") {
+          copy build\RathonWare.exe dist\
+        } elseif (Test-Path "build\Release\RathonWare.exe") {
           copy build\Release\RathonWare.exe dist\
-        } elseif (Test-Path "build\src\Release\RathonWare.exe") {
-          copy build\src\Release\RathonWare.exe dist\
-        } else {
-          Write-Error "Could not find compiled RathonWare.exe"
         }
-        
-        # Run windeployqt to copy Qt DLLs and plugins
         windeployqt --qmldir qml dist\RathonWare.exe
       shell: powershell
 
     - name: Build Installer (Inno Setup)
       run: |
-        iscc installer.iss
+        $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+        if (-not (Test-Path $iscc)) {
+          $iscc = "C:\Program Files\Inno Setup 6\ISCC.exe"
+        }
+        & $iscc installer.iss
+      shell: powershell
 
     - name: Create Release and Upload Asset
       uses: softprops/action-gh-release@v2
       with:
         files: build/RathonWareSetup.exe
+        name: "RathonWare v1.0.0"
+        generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
