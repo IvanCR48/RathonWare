@@ -1,6 +1,7 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQuickStyle>
 #include <QIcon>
 #include "system_monitor.h"
 #include "process_model.h"
@@ -15,6 +16,9 @@ int main(int argc, char *argv[])
     QGuiApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::Round);
 
     QGuiApplication app(argc, argv);
+
+    // Set Quick Controls style to "Basic" so custom QML contentItem & background delegates render without warnings
+    QQuickStyle::setStyle("Basic");
 
     app.setWindowIcon(QIcon(":/RathonWare/assets/logo.png"));
     app.setOrganizationName("Rathon");

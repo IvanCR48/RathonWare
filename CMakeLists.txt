@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_compile_definitions(_WIN32_WINNT=0x0A00 WINVER=0x0A00)
 
 # Qt 6 configuration
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2)
 
 qt_standard_project_setup()
 
@@ -71,6 +71,7 @@ target_link_libraries(RathonWare PRIVATE
     Qt6::Gui
     Qt6::Qml
     Qt6::Quick
+    Qt6::QuickControls2
 )
 
 # Compiler flags
