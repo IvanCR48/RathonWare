@@ -76,6 +76,7 @@ $Iscc = Get-Command iscc -ErrorAction SilentlyContinue | Select-Object -ExpandPr
 if ($null -eq $Iscc) {
     # Try looking in common Inno Setup installation paths
     $InnoPaths = @(
+        "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
         "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
         "C:\Program Files\Inno Setup 6\ISCC.exe",
         "C:\Program Files (x86)\Inno Setup 5\ISCC.exe"
