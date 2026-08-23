@@ -32,6 +32,8 @@ QVariant ProcessModel::data(const QModelIndex &index, int role) const
     switch (role) {
     case PidRole:
         return static_cast<qlonglong>(process.pid);
+    case ParentPidRole:
+        return static_cast<qlonglong>(process.parentPid);
     case NameRole:
         return process.name;
     case CpuRole:
@@ -50,6 +52,10 @@ QVariant ProcessModel::data(const QModelIndex &index, int role) const
         return process.cmdLine;
     case PriorityRole:
         return process.priority;
+    case IsSuspendedRole:
+        return process.isSuspended;
+    case IsEcoQosRole:
+        return process.isEcoQos;
     default:
         return QVariant();
     }
@@ -59,6 +65,7 @@ QHash<int, QByteArray> ProcessModel::roleNames() const
 {
     QHash<int, QByteArray> roles;
     roles[PidRole] = "pid";
+    roles[ParentPidRole] = "parentPid";
     roles[NameRole] = "name";
     roles[CpuRole] = "cpu";
     roles[RamRole] = "ram";
@@ -68,6 +75,8 @@ QHash<int, QByteArray> ProcessModel::roleNames() const
     roles[UsernameRole] = "username";
     roles[CmdLineRole] = "cmdLine";
     roles[PriorityRole] = "priority";
+    roles[IsSuspendedRole] = "isSuspended";
+    roles[IsEcoQosRole] = "isEcoQos";
     return roles;
 }
 
@@ -96,6 +105,15 @@ bool ProcessModel::killProcess(int pid)
     return success;
 }
 
+bool ProcessModel::killProcessTree(int pid)
+{
+    bool success = m_manager.killProcessTree(pid);
+    if (success) {
+        refresh();
+    }
+    return success;
+}
+
 bool ProcessModel::setPriority(int pid, int priorityClassValue)
 {
     bool success = m_manager.setPriority(pid, priorityClassValue);
@@ -117,6 +135,33 @@ bool ProcessModel::suspendProcess(int pid)
 bool ProcessModel::resumeProcess(int pid)
 {
     bool success = m_manager.resumeProcess(pid);
+    if (success) {
+        refresh();
+    }
+    return success;
+}
+
+bool ProcessModel::pinToECores(int pid)
+{
+    bool success = m_manager.pinToECores(pid);
+    if (success) {
+        refresh();
+    }
+    return success;
+}
+
+bool ProcessModel::pinToPCores(int pid)
+{
+    bool success = m_manager.pinToPCores(pid);
+    if (success) {
+        refresh();
+    }
+    return success;
+}
+
+bool ProcessModel::resetAffinity(int pid)
+{
+    bool success = m_manager.resetAffinity(pid);
     if (success) {
         refresh();
     }

@@ -2,7 +2,10 @@
 #include <windows.h>
 #include <tlhelp32.h>
 #include <psapi.h>
+#include <processthreadsapi.h>
 #include <QDebug>
+#include <QQueue>
+#include <vector>
 
 // Internal definitions for process command line reading (PEB access)
 typedef NTSTATUS(NTAPI* pfnNtQueryInformationProcess)(
@@ -12,6 +15,12 @@ typedef NTSTATUS(NTAPI* pfnNtQueryInformationProcess)(
     ULONG ProcessInformationLength,
     PULONG ReturnLength
 );
+
+typedef NTSTATUS(NTAPI* pfnNtSuspendProcess)(HANDLE ProcessHandle);
+typedef NTSTATUS(NTAPI* pfnNtResumeProcess)(HANDLE ProcessHandle);
+
+static pfnNtSuspendProcess NtSuspendProcess = nullptr;
+static pfnNtResumeProcess NtResumeProcess = nullptr;
 
 struct PROCESS_BASIC_INFORMATION {
     NTSTATUS ExitStatus;
@@ -135,10 +144,64 @@ ProcessManager::ProcessManager()
     GetSystemInfo(&sysInfo);
     m_numCores = sysInfo.dwNumberOfProcessors;
     if (m_numCores < 1) m_numCores = 1;
+
+    // Load ntdll exports for Process Suspend & Resume
+    HMODULE hNtDll = GetModuleHandleW(L"ntdll.dll");
+    if (hNtDll) {
+        NtSuspendProcess = (pfnNtSuspendProcess)GetProcAddress(hNtDll, "NtSuspendProcess");
+        NtResumeProcess = (pfnNtResumeProcess)GetProcAddress(hNtDll, "NtResumeProcess");
+    }
+
+    initCpuTopology();
 }
 
 ProcessManager::~ProcessManager()
 {
+}
+
+void ProcessManager::initCpuTopology()
+{
+    DWORD length = 0;
+    GetLogicalProcessorInformationEx(RelationProcessorCore, NULL, &length);
+    if (length > 0) {
+        std::vector<BYTE> buffer(length);
+        PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX info = reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(buffer.data());
+        if (GetLogicalProcessorInformationEx(RelationProcessorCore, info, &length)) {
+            BYTE* ptr = buffer.data();
+            while (ptr < buffer.data() + length) {
+                PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX item = reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(ptr);
+                if (item->Relationship == RelationProcessorCore) {
+                    KAFFINITY mask = item->Processor.GroupMask[0].Mask;
+                    // In Windows 10/11, EfficiencyClass is byte at offset 1 in PROCESSOR_RELATIONSHIP
+                    BYTE efficiencyClass = reinterpret_cast<const BYTE*>(&item->Processor)[1];
+                    if (efficiencyClass > 0) {
+                        m_pCoreMask |= mask;
+                    } else {
+                        m_eCoreMask |= mask;
+                    }
+                    m_allCoresMask |= mask;
+                }
+                ptr += item->Size;
+            }
+        }
+    }
+
+    if (m_pCoreMask != 0 && m_eCoreMask != 0) {
+        m_hasHybridCores = true;
+    } else {
+        // Fallback for uniform multi-core systems: lower half = P-Cores, upper half = E-Cores
+        if (m_allCoresMask == 0) {
+            m_allCoresMask = (m_numCores >= 64) ? ~0ULL : ((1ULL << m_numCores) - 1);
+        }
+        int half = m_numCores / 2;
+        if (half >= 1) {
+            m_pCoreMask = (1ULL << half) - 1;
+            m_eCoreMask = m_allCoresMask & ~m_pCoreMask;
+        } else {
+            m_pCoreMask = m_allCoresMask;
+            m_eCoreMask = m_allCoresMask;
+        }
+    }
 }
 
 QVector<ProcessInfo> ProcessManager::updateProcessList()
@@ -168,11 +231,11 @@ QVector<ProcessInfo> ProcessManager::updateProcessList()
             QString username = "SYSTEM";
             QString cmdLine = "N/A";
             QString priority = "Normal";
+            bool isEcoQos = false;
+            DWORD_PTR affinityMask = 0;
 
-            // Open process with query and read memory access (requires Admin for many paths)
             HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
             if (!hProcess) {
-                // Try limited open if full query/read fails
                 hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
             }
 
@@ -203,7 +266,6 @@ QVector<ProcessInfo> ProcessManager::updateProcessList()
                         }
                     }
 
-                    // Cache times
                     ProcessTimeRecord newRecord;
                     newRecord.kernelTime = kernelTime;
                     newRecord.userTime = userTime;
@@ -220,11 +282,21 @@ QVector<ProcessInfo> ProcessManager::updateProcessList()
                 // Query priority
                 priority = GetPriorityString(hProcess);
 
+                // Query affinity
+                DWORD_PTR processAffinity = 0, systemAffinity = 0;
+                if (GetProcessAffinityMask(hProcess, &processAffinity, &systemAffinity)) {
+                    affinityMask = processAffinity;
+                    if (m_eCoreMask != 0 && (affinityMask & ~m_eCoreMask) == 0) {
+                        isEcoQos = true;
+                    }
+                }
+
                 CloseHandle(hProcess);
             }
 
             ProcessInfo info;
             info.pid = pid;
+            info.parentPid = pe32.th32ParentProcessID;
             info.name = name;
             info.cpuUsage = cpuUsage;
             info.ramUsage = ramUsage;
@@ -234,6 +306,9 @@ QVector<ProcessInfo> ProcessManager::updateProcessList()
             info.username = username;
             info.cmdLine = cmdLine;
             info.priority = priority;
+            info.isSuspended = m_suspendedPids.contains(pid);
+            info.isEcoQos = isEcoQos;
+            info.affinityMask = affinityMask;
             processes.append(info);
 
         } while (Process32NextW(hSnapshot, &pe32));
@@ -246,15 +321,68 @@ QVector<ProcessInfo> ProcessManager::updateProcessList()
 
 bool ProcessManager::killProcess(unsigned long pid)
 {
+    if (pid <= 4) return false;
     HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
     if (!hProcess) return false;
-    bool success = TerminateProcess(hProcess, 0);
+    bool success = TerminateProcess(hProcess, 1);
     CloseHandle(hProcess);
+    m_suspendedPids.remove(pid);
     return success;
+}
+
+bool ProcessManager::killProcessTree(unsigned long pid)
+{
+    if (pid <= 4) return false;
+
+    // 1. Take snapshot of all active processes to build parent->children tree
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnapshot == INVALID_HANDLE_VALUE) {
+        return killProcess(pid);
+    }
+
+    QHash<unsigned long, QVector<unsigned long>> childrenMap;
+    PROCESSENTRY32W pe;
+    pe.dwSize = sizeof(PROCESSENTRY32W);
+
+    if (Process32FirstW(hSnapshot, &pe)) {
+        do {
+            childrenMap[pe.th32ParentProcessID].append(pe.th32ProcessID);
+        } while (Process32NextW(hSnapshot, &pe));
+    }
+    CloseHandle(hSnapshot);
+
+    // 2. BFS collect all descendant PIDs
+    QVector<unsigned long> toKill;
+    QQueue<unsigned long> queue;
+    queue.enqueue(pid);
+
+    while (!queue.isEmpty()) {
+        unsigned long current = queue.dequeue();
+        toKill.append(current);
+
+        if (childrenMap.contains(current)) {
+            for (unsigned long childPid : childrenMap[current]) {
+                if (childPid > 4 && !toKill.contains(childPid)) {
+                    queue.enqueue(childPid);
+                }
+            }
+        }
+    }
+
+    // 3. Kill in reverse order (bottom-up: children first, parent last)
+    bool allSuccess = true;
+    for (int i = toKill.size() - 1; i >= 0; --i) {
+        if (!killProcess(toKill[i])) {
+            allSuccess = false;
+        }
+    }
+
+    return allSuccess;
 }
 
 bool ProcessManager::setPriority(unsigned long pid, int priorityClassValue)
 {
+    if (pid <= 4) return false;
     HANDLE hProcess = OpenProcess(PROCESS_SET_INFORMATION, FALSE, pid);
     if (!hProcess) return false;
 
@@ -275,6 +403,22 @@ bool ProcessManager::setPriority(unsigned long pid, int priorityClassValue)
 
 bool ProcessManager::suspendProcess(unsigned long pid)
 {
+    if (pid <= 4) return false;
+
+    // Use native NtSuspendProcess if available
+    if (NtSuspendProcess) {
+        HANDLE hProcess = OpenProcess(PROCESS_SUSPEND_RESUME, FALSE, pid);
+        if (hProcess) {
+            NTSTATUS status = NtSuspendProcess(hProcess);
+            CloseHandle(hProcess);
+            if (status == 0) {
+                m_suspendedPids.insert(pid);
+                return true;
+            }
+        }
+    }
+
+    // Fallback to thread enumeration snapshot
     HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
     if (hSnapshot == INVALID_HANDLE_VALUE) return false;
     
@@ -292,11 +436,28 @@ bool ProcessManager::suspendProcess(unsigned long pid)
         } while (Thread32Next(hSnapshot, &te));
     }
     CloseHandle(hSnapshot);
+    m_suspendedPids.insert(pid);
     return true;
 }
 
 bool ProcessManager::resumeProcess(unsigned long pid)
 {
+    if (pid <= 4) return false;
+
+    // Use native NtResumeProcess if available
+    if (NtResumeProcess) {
+        HANDLE hProcess = OpenProcess(PROCESS_SUSPEND_RESUME, FALSE, pid);
+        if (hProcess) {
+            NTSTATUS status = NtResumeProcess(hProcess);
+            CloseHandle(hProcess);
+            if (status == 0) {
+                m_suspendedPids.remove(pid);
+                return true;
+            }
+        }
+    }
+
+    // Fallback to thread enumeration snapshot
     HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
     if (hSnapshot == INVALID_HANDLE_VALUE) return false;
     
@@ -314,5 +475,61 @@ bool ProcessManager::resumeProcess(unsigned long pid)
         } while (Thread32Next(hSnapshot, &te));
     }
     CloseHandle(hSnapshot);
+    m_suspendedPids.remove(pid);
     return true;
+}
+
+bool ProcessManager::pinToECores(unsigned long pid)
+{
+    if (pid <= 4 || m_eCoreMask == 0) return false;
+    HANDLE hProcess = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_SET_QUOTA, FALSE, pid);
+    if (!hProcess) return false;
+
+    bool affSuccess = SetProcessAffinityMask(hProcess, m_eCoreMask);
+    setEcoQos(pid, true);
+    SetPriorityClass(hProcess, BELOW_NORMAL_PRIORITY_CLASS);
+    CloseHandle(hProcess);
+    return affSuccess;
+}
+
+bool ProcessManager::pinToPCores(unsigned long pid)
+{
+    if (pid <= 4 || m_pCoreMask == 0) return false;
+    HANDLE hProcess = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_SET_QUOTA, FALSE, pid);
+    if (!hProcess) return false;
+
+    bool affSuccess = SetProcessAffinityMask(hProcess, m_pCoreMask);
+    setEcoQos(pid, false);
+    SetPriorityClass(hProcess, NORMAL_PRIORITY_CLASS);
+    CloseHandle(hProcess);
+    return affSuccess;
+}
+
+bool ProcessManager::resetAffinity(unsigned long pid)
+{
+    if (pid <= 4 || m_allCoresMask == 0) return false;
+    HANDLE hProcess = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_SET_QUOTA, FALSE, pid);
+    if (!hProcess) return false;
+
+    bool affSuccess = SetProcessAffinityMask(hProcess, m_allCoresMask);
+    setEcoQos(pid, false);
+    CloseHandle(hProcess);
+    return affSuccess;
+}
+
+bool ProcessManager::setEcoQos(unsigned long pid, bool enable)
+{
+    if (pid <= 4) return false;
+    HANDLE hProcess = OpenProcess(PROCESS_SET_INFORMATION, FALSE, pid);
+    if (!hProcess) return false;
+
+    PROCESS_POWER_THROTTLING_STATE powerThrottling;
+    memset(&powerThrottling, 0, sizeof(powerThrottling));
+    powerThrottling.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+    powerThrottling.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+    powerThrottling.StateMask = enable ? PROCESS_POWER_THROTTLING_EXECUTION_SPEED : 0;
+
+    bool success = SetProcessInformation(hProcess, ProcessPowerThrottling, &powerThrottling, sizeof(powerThrottling));
+    CloseHandle(hProcess);
+    return success;
 }

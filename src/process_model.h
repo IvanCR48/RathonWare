@@ -8,10 +8,12 @@
 class ProcessModel : public QAbstractListModel
 {
     Q_OBJECT
+    Q_PROPERTY(bool hasHybridCores READ hasHybridCores CONSTANT)
 
 public:
     enum ProcessRoles {
         PidRole = Qt::UserRole + 1,
+        ParentPidRole,
         NameRole,
         CpuRole,
         RamRole,
@@ -20,7 +22,9 @@ public:
         ThreadsRole,
         UsernameRole,
         CmdLineRole,
-        PriorityRole
+        PriorityRole,
+        IsSuspendedRole,
+        IsEcoQosRole
     };
 
     explicit ProcessModel(QObject *parent = nullptr);
@@ -30,11 +34,17 @@ public:
     QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
     QHash<int, QByteArray> roleNames() const override;
 
+    bool hasHybridCores() const { return m_manager.hasHybridCores(); }
+
     Q_INVOKABLE void refresh();
     Q_INVOKABLE bool killProcess(int pid);
+    Q_INVOKABLE bool killProcessTree(int pid);
     Q_INVOKABLE bool setPriority(int pid, int priorityClassValue);
     Q_INVOKABLE bool suspendProcess(int pid);
     Q_INVOKABLE bool resumeProcess(int pid);
+    Q_INVOKABLE bool pinToECores(int pid);
+    Q_INVOKABLE bool pinToPCores(int pid);
+    Q_INVOKABLE bool resetAffinity(int pid);
 
 private:
     ProcessManager m_manager;

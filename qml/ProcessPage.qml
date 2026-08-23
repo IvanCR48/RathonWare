@@ -8,6 +8,18 @@ Item {
 
     property string searchText: ""
     property int expandedPid: -1 // Track which row is expanded to show command line
+    property var portResults: []
+
+    function checkPortQuery(text) {
+        if (text.startsWith(":")) {
+            var p = parseInt(text.substring(1));
+            if (!isNaN(p) && p > 0) {
+                portResults = portManager.getProcessesByPort(p);
+                return;
+            }
+        }
+        portResults = [];
+    }
 
     // Context Menu for right-click process actions
     Menu {
@@ -19,6 +31,57 @@ Item {
             text: "End Task (Kill)"
             onTriggered: processModel.killProcess(processContextMenu.targetPid)
         }
+
+        MenuItem {
+            text: "🌲 Kill Entire Process Tree"
+            onTriggered: processModel.killProcessTree(processContextMenu.targetPid)
+        }
+
+        MenuSeparator {}
+
+        MenuItem {
+            text: "🌿 Pin to E-Cores (Efficiency Mode)"
+            onTriggered: {
+                processModel.pinToECores(processContextMenu.targetPid);
+                processModel.refresh();
+            }
+        }
+
+        MenuItem {
+            text: "⚡ Pin to P-Cores (Max Boost)"
+            onTriggered: {
+                processModel.pinToPCores(processContextMenu.targetPid);
+                processModel.refresh();
+            }
+        }
+
+        MenuItem {
+            text: "🔄 Reset Affinity (All Cores)"
+            onTriggered: {
+                processModel.resetAffinity(processContextMenu.targetPid);
+                processModel.refresh();
+            }
+        }
+
+        MenuSeparator {}
+
+        MenuItem {
+            text: "⏸️ Suspend Execution"
+            onTriggered: {
+                processModel.suspendProcess(processContextMenu.targetPid);
+                processModel.refresh();
+            }
+        }
+
+        MenuItem {
+            text: "▶️ Resume Execution"
+            onTriggered: {
+                processModel.resumeProcess(processContextMenu.targetPid);
+                processModel.refresh();
+            }
+        }
+
+        MenuSeparator {}
         
         Menu {
             title: "Set Priority Class"
@@ -28,16 +91,6 @@ Item {
             MenuItem { text: "Normal"; onTriggered: processModel.setPriority(processContextMenu.targetPid, 2) }
             MenuItem { text: "Below Normal"; onTriggered: processModel.setPriority(processContextMenu.targetPid, 1) }
             MenuItem { text: "Idle"; onTriggered: processModel.setPriority(processContextMenu.targetPid, 0) }
-        }
-
-        MenuItem {
-            text: "Suspend Execution"
-            onTriggered: processModel.suspendProcess(processContextMenu.targetPid)
-        }
-
-        MenuItem {
-            text: "Resume Execution"
-            onTriggered: processModel.resumeProcess(processContextMenu.targetPid)
         }
     }
 
@@ -52,9 +105,9 @@ Item {
 
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 32
+                Layout.preferredHeight: 34
                 color: "#ffffff"
-                radius: 3
+                radius: 4
                 border.color: window.colorCardBorder
                 border.width: 1
 
@@ -79,14 +132,30 @@ Item {
                         clip: true
                         activeFocusOnTab: true
                         
-                        onTextChanged: root.searchText = text
+                        onTextChanged: {
+                            root.searchText = text;
+                            root.checkPortQuery(text);
+                        }
 
                         Text {
-                            text: "Search processes by executable name..."
+                            text: "Search processes by name, or type ':3000' for port killer..."
                             font.family: "Tahoma"
                             font.pixelSize: 12
                             color: "#92a6b9"
                             visible: !parent.text && !parent.activeFocus
+                        }
+                    }
+
+                    // Clear button
+                    Text {
+                        visible: searchInput.text.length > 0
+                        text: "✕"
+                        font.pixelSize: 12
+                        color: "#94a3b8"
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: searchInput.text = ""
                         }
                     }
                 }
@@ -94,11 +163,11 @@ Item {
 
             Button {
                 id: refreshBtn
-                Layout.preferredHeight: 32
+                Layout.preferredHeight: 34
                 Layout.preferredWidth: 80
                 background: Rectangle {
                     color: refreshBtn.hovered ? "#e3ebf4" : window.colorCard
-                    radius: 3
+                    radius: 4
                     border.color: window.colorCardBorder
                     border.width: 1
                 }
@@ -111,7 +180,103 @@ Item {
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
                 }
-                onClicked: processModel.refresh()
+                onClicked: {
+                    processModel.refresh();
+                    root.checkPortQuery(searchInput.text);
+                }
+            }
+        }
+
+        // Port Search Match Banner (When :port is typed)
+        Rectangle {
+            visible: root.searchText.startsWith(":")
+            Layout.fillWidth: true
+            Layout.preferredHeight: portCol.implicitHeight + 20
+            color: "#eef6ff"
+            radius: 5
+            border.color: "#93c5fd"
+            border.width: 1
+
+            ColumnLayout {
+                id: portCol
+                anchors.fill: parent
+                anchors.margins: 10
+                spacing: 6
+
+                Text {
+                    text: "⚡ PORT-TO-PROCESS KILLER: SEARCH FOR " + root.searchText.toUpperCase()
+                    font.family: "Tahoma"
+                    font.pixelSize: 11
+                    font.bold: true
+                    color: "#1d4ed8"
+                }
+
+                Repeater {
+                    model: root.portResults
+                    delegate: Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 40
+                        color: "#ffffff"
+                        radius: 4
+                        border.color: "#bfdbfe"
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: 6
+                            spacing: 10
+
+                            Rectangle {
+                                Layout.preferredWidth: 50
+                                Layout.preferredHeight: 24
+                                color: "#1d4ed8"
+                                radius: 3
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: ":" + modelData.port
+                                    font.family: "Consolas"; font.pixelSize: 11; font.bold: true; color: "#ffffff"
+                                }
+                            }
+
+                            Text {
+                                text: modelData.name + " (PID: " + modelData.pid + ")"
+                                font.family: "Tahoma"; font.pixelSize: 12; font.bold: true; color: "#000000"
+                            }
+
+                            Text {
+                                text: "Protocol: " + modelData.protocol + "  |  Memory: " + modelData.ramMB.toFixed(1) + " MB"
+                                font.family: "Consolas"; font.pixelSize: 11; color: "#555555"
+                                Layout.fillWidth: true
+                            }
+
+                            Button {
+                                Layout.preferredWidth: 80
+                                Layout.preferredHeight: 28
+                                background: Rectangle {
+                                    color: parent.hovered ? "#b91c1c" : "#dc2626"
+                                    radius: 3
+                                }
+                                contentItem: Text {
+                                    text: "⚡ Kill"
+                                    font.family: "Tahoma"; font.pixelSize: 11; font.bold: true; color: "#ffffff"
+                                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                                }
+                                onClicked: {
+                                    portManager.killProcessByPid(modelData.pid);
+                                    processModel.refresh();
+                                    root.checkPortQuery(searchInput.text);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    visible: root.portResults.length === 0
+                    text: "No active process listening on port " + root.searchText.substring(1)
+                    font.family: "Tahoma"
+                    font.pixelSize: 11
+                    color: "#6b7280"
+                }
             }
         }
 
@@ -189,7 +354,7 @@ Item {
                     height: parent.height
                     verticalAlignment: Text.AlignVCenter
                     horizontalAlignment: Text.AlignHCenter
-                    text: "Priority"
+                    text: "Priority / State"
                     font.family: "Tahoma"; font.pixelSize: 11; font.bold: true; color: window.colorTextMain
                 }
             }
@@ -222,7 +387,7 @@ Item {
                     id: delegateItem
                     width: processListView.width
                     
-                    property bool matchesFilter: !root.searchText || name.toLowerCase().includes(root.searchText.toLowerCase())
+                    property bool matchesFilter: !root.searchText || root.searchText.startsWith(":") || name.toLowerCase().includes(root.searchText.toLowerCase())
                     property bool isExpanded: root.expandedPid === pid
                     
                     height: matchesFilter ? (isExpanded ? 75 : 38) : 0
@@ -245,11 +410,11 @@ Item {
                                 Layout.fillWidth: true
                                 height: 26
 
-                                // Name
+                                // Name + Status Badges
                                 Row {
                                     width: parent.width * 0.30
                                     height: parent.height
-                                    spacing: 8
+                                    spacing: 6
 
                                     Rectangle {
                                         width: 6; height: 6; radius: 3
@@ -263,6 +428,44 @@ Item {
                                         color: window.colorTextMain
                                         elide: Text.ElideRight
                                         anchors.verticalCenter: parent.verticalCenter
+                                    }
+
+                                    // Suspended pill badge
+                                    Rectangle {
+                                        visible: isSuspended
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 52
+                                        height: 16
+                                        color: "#fef3c7"
+                                        radius: 2
+                                        border.color: "#f59e0b"
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "PAUSED"
+                                            font.family: "Consolas"
+                                            font.pixelSize: 8
+                                            font.bold: true
+                                            color: "#b45309"
+                                        }
+                                    }
+
+                                    // E-Core pill badge
+                                    Rectangle {
+                                        visible: isEcoQos
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 48
+                                        height: 16
+                                        color: "#ecfdf5"
+                                        radius: 2
+                                        border.color: "#10b981"
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "E-CORE"
+                                            font.family: "Consolas"
+                                            font.pixelSize: 8
+                                            font.bold: true
+                                            color: "#047857"
+                                        }
                                     }
                                 }
 
