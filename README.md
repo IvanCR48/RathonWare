@@ -1,42 +1,61 @@
-# RathonWare - PC Diagnostics & Task Manager Suite
+# RathonWare - Hardware Diagnostics, AI/GPU Telemetry & Task Manager Suite
 
-A high-performance system monitoring dashboard and process manager for Windows, built in **C++20** and **Qt 6 (QML / Qt Quick)**.
-
-## Screenshots & Features
-*   **Real-time Dashboard:** Circular load dials and scrolling telemetry charts for **CPU Load**, **GPU Load & Temperature**, and **System RAM**.
-*   **Interactive Task Manager:** Lists all active Windows processes sorted by active CPU usage. Includes real-time memory stats, searching, and a clean "End Task" termination button.
-*   **Hardware Spec Sheets:** Displays detailed hardware profiles using direct OS query bindings.
-*   **Dynamic Graphics Interfacing:** Auto-detects NVIDIA cards by dynamically loading the driver's kernel interface (`nvml.dll`) to display temperatures and dedicated VRAM loads. Falls back gracefully for non-Nvidia GPUs.
+A high-performance system monitoring dashboard and superpower developer utility for Windows, built with **C++20** and **Qt 6 (QML / Qt Quick)**.
 
 ---
 
-## Technical Stack
-*   **UI Frontend:** Qt Quick / QML 6.x (hardware-accelerated, animated layout, HTML5-like Canvas charts)
-*   **System Queries (C++):**
-    *   `GetSystemTimes` (CPU load delta calculations)
-    *   `GlobalMemoryStatusEx` (Physical RAM)
-    *   `CreateToolhelp32Snapshot` (Active processes enumeration)
-    *   `GetProcessMemoryInfo` (Individual process RAM allocations)
-    *   `TerminateProcess` (Task termination)
-    *   `LoadLibrary` / `GetProcAddress` (Dynamic linkage of Nvidia NVML API)
+## ⚡ Flagship Features
+
+### 🛠️ Pillar 1: Developer Life-Saver Features
+*   **Port-to-Process Killer (`:port` search):** Type `:3000`, `:8080`, or `:5432` into the search bar or Command Palette to instantly find the exact listening process with a 1-click **⚡ Kill** button (resolves `EADDRINUSE` in seconds via Win32 `GetExtendedTcpTable` / `GetExtendedUdpTable`).
+*   **"Unlock File / Who is Locking This?":** Drag & drop any locked file/folder or enter its path to inspect holding processes and terminate them with 1-click using the Windows Restart Manager API (`rstrtmgr.lib`).
+*   **Process Suspend & Resume (`NtSuspendProcess` / `NtResumeProcess`):** Freeze runaway 100% CPU processes without losing memory or state.
+*   **"Kill Entire Process Tree":** Recursively terminate spawned child processes (Node workers, Python runners, build tools) cleanly.
+*   **Global Ctrl + K Command Palette:** Spotlight-style quick launcher for instant port killing, file unlocking, and process actions.
+
+### 🤖 Pillar 2: Modern AI & GPU Telemetry Tab (NVML Superpowers)
+*   **Per-Process VRAM & CUDA Breakdown:** Dedicated tab utilizing NVML to display dedicated VRAM per process, compute vs graphics tags (Ollama, PyTorch, ComfyUI, 3D engines), and VRAM share percentage.
+*   **GPU Throttle Reason Indicator:** Real-time hardware status tag showing downclock reasons (e.g. *Full Boost / None*, *Power Cap Limit*, *Thermal Limit*, *Hardware Slowdown*).
+*   **Real-time Power & Clocks:** Live wattage draw (e.g., `280W / 450W`), GPU core temperature, graphics and memory clocks.
+*   **VRAM Memory Leak Detector:** Automated heuristic that tracks time-series VRAM allocation trends and alerts with ⚠️ *VRAM Leak Suspected* badges.
+
+### 🎛️ Pillar 3: CPU Topology & Intel P-Core / E-Core Manager
+*   **1-Click "Pin to E-Cores" (Efficiency Mode on Steroids):** Automatically scan background apps (Discord, Chrome, Slack, Spotify, Torrents, Node, Python) and lock them to E-Cores with Windows EcoQoS, freeing 100% of P-Cores for gaming and heavy foreground compute.
+*   **Per-Core CPU Heatmap Grid:** Real-time visual grid displaying every logical core with load %, P-Core/E-Core identification, and dynamic heat color gradient using low-overhead NT kernel `NtQuerySystemInformation`.
 
 ---
 
-## How to Build and Run in Qt Creator
+## 🛠️ Technical Stack
+*   **UI Frontend:** Qt Quick / QML 6.x (hardware-accelerated, responsive layout, dynamic Canvas telemetry charts)
+*   **System & Kernel Queries (C++20 / Win32):**
+    *   `GetExtendedTcpTable` / `GetExtendedUdpTable` (IPv4 & IPv6 Port-to-Process correlation)
+    *   `RestartManager` (`RmStartSession`, `RmRegisterResources`, `RmGetList`, `RmEndSession`)
+    *   `NtQuerySystemInformation(SystemProcessorPerformanceInformation)` (Per-core CPU telemetry)
+    *   `NtSuspendProcess` / `NtResumeProcess` (`ntdll.dll`)
+    *   `GetLogicalProcessorInformationEx` (CPU P-Core / E-Core topology discovery)
+    *   `SetProcessAffinityMask` & `SetProcessInformation(ProcessPowerThrottling)` (EcoQoS)
+    *   `GetSystemTimes` & `GlobalMemoryStatusEx`
+    *   `CreateToolhelp32Snapshot` & `GetProcessMemoryInfo`
+    *   `LoadLibrary` / `GetProcAddress` (NVIDIA NVML dynamic bindings)
 
-Follow these steps to open, configure, and launch the application:
+---
 
-### Step 1: Open the Project
-1. Launch **Qt Creator**.
-2. Click on **File** in the top menu, then select **Open File or Project...**
-3. Navigate to: `c:\xampp\htdocs\RathonWare`
-4. Select the `CMakeLists.txt` file and click **Open**.
+## 🚀 How to Build and Run
 
-### Step 2: Configure the Kit
-1. Qt Creator will open the **Configure Project** tab.
-2. Under the list of available kits, select the **Desktop Qt 6.x.x MinGW 64-bit** kit.
-3. Click the **Configure Project** button.
+### Prerequisites
+*   Windows 10 or Windows 11 (64-bit)
+*   **Qt 6.x** with MinGW 64-bit (or MSVC)
+*   **CMake 3.16+** & **Ninja**
 
-### Step 3: Compile & Launch
-1. On the bottom-left sidebar of Qt Creator, click the green **Run** arrow (or press `Ctrl + R` on your keyboard).
-2. The project will compile (takes a few seconds) and launch the styled window!
+### Command Line Build
+```powershell
+# Set Qt toolchain paths
+$env:PATH = "C:\Qt\Tools\mingw1310_64\bin;C:\Qt\Tools\CMake_64\bin;C:\Qt\Tools\Ninja;C:\Qt\6.11.1\mingw_64\bin;" + $env:PATH
+
+# Configure and compile in Release mode
+cmake -B build -G "Ninja" -DCMAKE_PREFIX_PATH="C:\Qt\6.11.1\mingw_64" -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+
+# Launch RathonWare
+./build/RathonWare.exe
+```
