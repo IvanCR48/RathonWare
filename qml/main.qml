@@ -1,12 +1,13 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 
 ApplicationWindow {
     id: window
-    width: 1100
-    height: 750
+    width: 1160
+    height: 780
     visible: true
-    title: "RathonWare - Hardware Diagnostics & Task Manager"
+    title: "RathonWare - Hardware Diagnostics, AI/GPU Telemetry & Task Manager"
     color: "#0d0e12"
 
     // Y2K Retro Light Blue Design System
@@ -21,16 +22,27 @@ ApplicationWindow {
 
     property string activePage: "dashboard"
 
+    // Global Command Palette Shortcuts
+    Shortcut {
+        sequence: "Ctrl+K"
+        onActivated: commandPalette.open()
+    }
+    Shortcut {
+        sequence: "Ctrl+F"
+        onActivated: commandPalette.open()
+    }
+
     // Custom Navigation Button Component (Retro Bevel/Flat Style)
     component NavButton : Item {
         id: navBtn
         property string label: ""
+        property string iconText: ""
         property bool isActive: false
         property color accentColor: "#0a246a"
         signal clicked()
 
         width: parent.width
-        height: 40
+        height: 38
 
         Rectangle {
             anchors.fill: parent
@@ -51,15 +63,27 @@ ApplicationWindow {
                 visible: navBtn.isActive
             }
 
-            Text {
-                text: navBtn.label
+            Row {
                 anchors.left: parent.left
                 anchors.leftMargin: navBtn.isActive ? 18 : 14
                 anchors.verticalCenter: parent.verticalCenter
-                font.family: "Tahoma"
-                font.pixelSize: 12
-                font.bold: navBtn.isActive
-                color: navBtn.isActive ? "#0a246a" : (mouseArea.containsMouse ? "#000000" : "#4d5b6e")
+                spacing: 8
+
+                Text {
+                    text: navBtn.iconText
+                    font.pixelSize: 11
+                    visible: navBtn.iconText !== ""
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                Text {
+                    text: navBtn.label
+                    font.family: "Tahoma"
+                    font.pixelSize: 11
+                    font.bold: navBtn.isActive
+                    color: navBtn.isActive ? "#0a246a" : (mouseArea.containsMouse ? "#000000" : "#4d5b6e")
+                    anchors.verticalCenter: parent.verticalCenter
+                }
             }
         }
 
@@ -93,13 +117,13 @@ ApplicationWindow {
 
             Column {
                 anchors.fill: parent
-                anchors.margins: 15
-                spacing: 20
+                anchors.margins: 14
+                spacing: 14
 
                 // Header / Branding (Retro active title-bar gradient feel)
                 Rectangle {
                     width: parent.width
-                    height: 54
+                    height: 52
                     gradient: Gradient {
                         orientation: Gradient.Horizontal
                         GradientStop { position: 0.0; color: "#0a246a" }
@@ -116,13 +140,13 @@ ApplicationWindow {
                         Text {
                             text: "RATHONWARE"
                             font.family: "Tahoma"
-                            font.pixelSize: 16
+                            font.pixelSize: 15
                             font.bold: true
                             color: "#ffffff"
                         }
 
                         Text {
-                            text: "PC PERFORMANCE GRAPH"
+                            text: "SUPERPOWER MONITOR"
                             font.family: "Tahoma"
                             font.pixelSize: 8
                             font.bold: true
@@ -142,31 +166,51 @@ ApplicationWindow {
                 // Nav Links
                 Column {
                     width: parent.width
-                    spacing: 6
+                    spacing: 4
 
                     NavButton {
                         label: "DASHBOARD"
+                        iconText: "📊"
                         isActive: window.activePage === "dashboard"
                         accentColor: window.colorCpu
                         onClicked: window.activePage = "dashboard"
                     }
 
                     NavButton {
-                        label: "SENSORS"
-                        isActive: window.activePage === "sensors"
+                        label: "AI & GPU TELEMETRY"
+                        iconText: "⚡"
+                        isActive: window.activePage === "gpu"
                         accentColor: window.colorGpu
-                        onClicked: window.activePage = "sensors"
+                        onClicked: window.activePage = "gpu"
+                    }
+
+                    NavButton {
+                        label: "CPU TOPOLOGY (P/E)"
+                        iconText: "🎛️"
+                        isActive: window.activePage === "topology"
+                        accentColor: window.colorCpu
+                        onClicked: window.activePage = "topology"
                     }
 
                     NavButton {
                         label: "TASK MANAGER"
+                        iconText: "⚙️"
                         isActive: window.activePage === "tasks"
                         accentColor: window.colorGpu
                         onClicked: window.activePage = "tasks"
                     }
 
                     NavButton {
+                        label: "SENSORS"
+                        iconText: "🌡️"
+                        isActive: window.activePage === "sensors"
+                        accentColor: window.colorGpu
+                        onClicked: window.activePage = "sensors"
+                    }
+
+                    NavButton {
                         label: "PERF GRAPHS"
+                        iconText: "📈"
                         isActive: window.activePage === "graphs"
                         accentColor: window.colorCpu
                         onClicked: window.activePage = "graphs"
@@ -174,6 +218,7 @@ ApplicationWindow {
 
                     NavButton {
                         label: "HARDWARE INFO"
+                        iconText: "💻"
                         isActive: window.activePage === "specs"
                         accentColor: window.colorRam
                         onClicked: window.activePage = "specs"
@@ -181,6 +226,7 @@ ApplicationWindow {
 
                     NavButton {
                         label: "ALERTS"
+                        iconText: "🔔"
                         isActive: window.activePage === "alerts"
                         accentColor: window.colorRam
                         onClicked: window.activePage = "alerts"
@@ -199,34 +245,97 @@ ApplicationWindow {
             Rectangle {
                 id: topBar
                 width: parent.width
-                height: 50
+                height: 52
                 color: "#eceef3"
                 anchors.top: parent.top
 
-                Text {
-                    text: window.activePage === "dashboard" ? "System Monitor Dashboard" :
-                          window.activePage === "sensors" ? "Detailed Hardware Sensors" :
-                          window.activePage === "tasks" ? "Active Running Processes" :
-                          window.activePage === "graphs" ? "Performance History Charts" :
-                          window.activePage === "specs" ? "Hardware Component Details" : "Sensor Alert Configuration"
-                    font.family: "Tahoma"
-                    font.pixelSize: 15
-                    font.bold: true
-                    color: window.colorTextMain
-                    anchors.left: parent.left
+                RowLayout {
+                    anchors.fill: parent
                     anchors.leftMargin: 20
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-
-                // System Model text display
-                Text {
-                    text: "Uptime: " + systemMonitor.uptime + "  |  " + systemMonitor.cpuModel
-                    font.family: "Tahoma"
-                    font.pixelSize: 11
-                    color: window.colorTextSec
-                    anchors.right: parent.right
                     anchors.rightMargin: 20
-                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 15
+
+                    Text {
+                        text: window.activePage === "dashboard" ? "System Monitor Dashboard" :
+                              window.activePage === "gpu" ? "Modern AI & GPU Telemetry (NVML Superpowers)" :
+                              window.activePage === "topology" ? "CPU Topology & Intel P-Core / E-Core Manager" :
+                              window.activePage === "sensors" ? "Detailed Hardware Sensors" :
+                              window.activePage === "tasks" ? "Active Running Processes & Port Killer" :
+                              window.activePage === "graphs" ? "Performance History Charts" :
+                              window.activePage === "specs" ? "Hardware Component Details" : "Sensor Alert Configuration"
+                        font.family: "Tahoma"
+                        font.pixelSize: 14
+                        font.bold: true
+                        color: window.colorTextMain
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    // Command Palette Trigger Search Box
+                    Rectangle {
+                        Layout.preferredWidth: 220
+                        Layout.preferredHeight: 30
+                        color: "#ffffff"
+                        radius: 4
+                        border.color: "#92a6b9"
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 8
+                            anchors.rightMargin: 8
+                            spacing: 6
+
+                            Text { text: "🔍"; font.pixelSize: 11 }
+                            Text {
+                                text: "Type ':3000' or Search..."
+                                font.family: "Tahoma"
+                                font.pixelSize: 10
+                                color: "#8fa3b8"
+                                Layout.fillWidth: true
+                            }
+                            Rectangle {
+                                Layout.preferredWidth: 46
+                                Layout.preferredHeight: 18
+                                color: "#e2ebf5"
+                                radius: 2
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "Ctrl + K"
+                                    font.family: "Consolas"
+                                    font.pixelSize: 9
+                                    font.bold: true
+                                    color: "#4d5b6e"
+                                }
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: commandPalette.open()
+                        }
+                    }
+
+                    // Unlock File Tool Button
+                    Button {
+                        Layout.preferredHeight: 30
+                        implicitWidth: 100
+                        background: Rectangle {
+                            color: parent.hovered ? "#e2ebf5" : "#ffffff"
+                            radius: 4
+                            border.color: "#92a6b9"
+                        }
+                        contentItem: RowLayout {
+                            anchors.centerIn: parent
+                            spacing: 4
+                            Text { text: "🔓"; font.pixelSize: 11 }
+                            Text {
+                                text: "Unlock File"
+                                font.family: "Tahoma"; font.pixelSize: 10; font.bold: true; color: "#0a246a"
+                            }
+                        }
+                        onClicked: fileUnlockerDialog.open()
+                    }
                 }
             }
 
@@ -246,13 +355,24 @@ ApplicationWindow {
                 anchors.bottom: parent.bottom
                 anchors.left: parent.left
                 anchors.right: parent.right
-                anchors.margins: 20
+                anchors.margins: 18
                 source: window.activePage === "dashboard" ? "DashboardPage.qml" :
+                        window.activePage === "gpu" ? "GpuTelemetryPage.qml" :
+                        window.activePage === "topology" ? "CpuTopologyPage.qml" :
                         window.activePage === "sensors" ? "SensorsPage.qml" :
                         window.activePage === "tasks" ? "ProcessPage.qml" :
                         window.activePage === "graphs" ? "GraphsPage.qml" :
                         window.activePage === "specs" ? "SpecsPage.qml" : "AlertsPage.qml"
             }
         }
+    }
+
+    // Hosted Overlays
+    CommandPalette {
+        id: commandPalette
+    }
+
+    FileUnlockerDialog {
+        id: fileUnlockerDialog
     }
 }

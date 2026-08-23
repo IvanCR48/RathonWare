@@ -5,7 +5,7 @@ project(RathonWare LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Target Windows 10 / 11 to expose modern Win32 APIs (e.g. MIB_IF_TABLE2)
+# Target Windows 10 / 11 to expose modern Win32 APIs (e.g. MIB_IF_TABLE2, RestartManager)
 add_compile_definitions(_WIN32_WINNT=0x0A00 WINVER=0x0A00)
 
 # Qt 6 configuration
@@ -22,6 +22,14 @@ set(SOURCES
     src/process_manager.cpp
     src/process_model.h
     src/process_model.cpp
+    src/port_manager.h
+    src/port_manager.cpp
+    src/file_unlocker.h
+    src/file_unlocker.cpp
+    src/gpu_monitor.h
+    src/gpu_monitor.cpp
+    src/cpu_topology.h
+    src/cpu_topology.cpp
     src/resources.rc
 )
 
@@ -30,6 +38,10 @@ set(QML_FILES
     qml/main.qml
     qml/DashboardPage.qml
     qml/ProcessPage.qml
+    qml/GpuTelemetryPage.qml
+    qml/CpuTopologyPage.qml
+    qml/CommandPalette.qml
+    qml/FileUnlockerDialog.qml
     qml/SpecsPage.qml
     qml/SensorsPage.qml
     qml/GraphsPage.qml
@@ -51,7 +63,7 @@ qt_add_qml_module(RathonWare
 
 # Windows specific library linkings
 if(WIN32)
-    target_link_libraries(RathonWare PRIVATE pdh psapi iphlpapi ole32 oleaut32 wbemuuid)
+    target_link_libraries(RathonWare PRIVATE pdh psapi iphlpapi rstrtmgr ole32 oleaut32 wbemuuid ws2_32)
 endif()
 
 target_link_libraries(RathonWare PRIVATE
