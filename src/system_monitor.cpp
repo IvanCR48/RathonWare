@@ -76,6 +76,14 @@ SystemMonitor::~SystemMonitor()
     if (m_nvmlLib) {
         FreeLibrary(m_nvmlLib);
     }
+    if (m_dxgiAdapter3) {
+        m_dxgiAdapter3->Release();
+        m_dxgiAdapter3 = nullptr;
+    }
+    if (m_dxgiFactory) {
+        m_dxgiFactory->Release();
+        m_dxgiFactory = nullptr;
+    }
     if (m_pdhInitialized && m_pdhQuery) {
         PdhCloseQuery(m_pdhQuery);
     }
@@ -110,32 +118,61 @@ double SystemMonitor::calculateCpuUsage()
 void SystemMonitor::initGpuQuery()
 {
     m_nvmlLib = LoadLibraryW(L"nvml.dll");
-    if (!m_nvmlLib) {
-        return;
-    }
+    if (m_nvmlLib) {
+        pfn_nvmlInit = (nvmlInit_v2_t)GetProcAddress(m_nvmlLib, "nvmlInit_v2");
+        pfn_nvmlShutdown = (nvmlShutdown_t)GetProcAddress(m_nvmlLib, "nvmlShutdown");
+        pfn_nvmlDeviceGetHandleByIndex = (nvmlDeviceGetHandleByIndex_v2_t)GetProcAddress(m_nvmlLib, "nvmlDeviceGetHandleByIndex_v2");
+        pfn_nvmlDeviceGetUtilizationRates = (nvmlDeviceGetUtilizationRates_t)GetProcAddress(m_nvmlLib, "nvmlDeviceGetUtilizationRates");
+        pfn_nvmlDeviceGetTemperature = (nvmlDeviceGetTemperature_t)GetProcAddress(m_nvmlLib, "nvmlDeviceGetTemperature");
+        pfn_nvmlDeviceGetMemoryInfo = (nvmlDeviceGetMemoryInfo_t)GetProcAddress(m_nvmlLib, "nvmlDeviceGetMemoryInfo");
+        pfn_nvmlDeviceGetName = (nvmlDeviceGetName_t)GetProcAddress(m_nvmlLib, "nvmlDeviceGetName");
 
-    pfn_nvmlInit = (nvmlInit_v2_t)GetProcAddress(m_nvmlLib, "nvmlInit_v2");
-    pfn_nvmlShutdown = (nvmlShutdown_t)GetProcAddress(m_nvmlLib, "nvmlShutdown");
-    pfn_nvmlDeviceGetHandleByIndex = (nvmlDeviceGetHandleByIndex_v2_t)GetProcAddress(m_nvmlLib, "nvmlDeviceGetHandleByIndex_v2");
-    pfn_nvmlDeviceGetUtilizationRates = (nvmlDeviceGetUtilizationRates_t)GetProcAddress(m_nvmlLib, "nvmlDeviceGetUtilizationRates");
-    pfn_nvmlDeviceGetTemperature = (nvmlDeviceGetTemperature_t)GetProcAddress(m_nvmlLib, "nvmlDeviceGetTemperature");
-    pfn_nvmlDeviceGetMemoryInfo = (nvmlDeviceGetMemoryInfo_t)GetProcAddress(m_nvmlLib, "nvmlDeviceGetMemoryInfo");
-    pfn_nvmlDeviceGetName = (nvmlDeviceGetName_t)GetProcAddress(m_nvmlLib, "nvmlDeviceGetName");
-
-    if (pfn_nvmlInit && pfn_nvmlShutdown && pfn_nvmlDeviceGetHandleByIndex &&
-        pfn_nvmlDeviceGetUtilizationRates && pfn_nvmlDeviceGetTemperature && 
-        pfn_nvmlDeviceGetMemoryInfo && pfn_nvmlDeviceGetName) 
-    {
-        if (pfn_nvmlInit() == NVML_SUCCESS) {
-            if (pfn_nvmlDeviceGetHandleByIndex(0, &m_nvmlDevice) == NVML_SUCCESS) {
-                m_nvmlInitialized = true;
-            } else {
-                pfn_nvmlShutdown();
+        if (pfn_nvmlInit && pfn_nvmlShutdown && pfn_nvmlDeviceGetHandleByIndex &&
+            pfn_nvmlDeviceGetUtilizationRates && pfn_nvmlDeviceGetTemperature && 
+            pfn_nvmlDeviceGetMemoryInfo && pfn_nvmlDeviceGetName) 
+        {
+            if (pfn_nvmlInit() == NVML_SUCCESS) {
+                if (pfn_nvmlDeviceGetHandleByIndex(0, &m_nvmlDevice) == NVML_SUCCESS) {
+                    m_nvmlInitialized = true;
+                    m_gpuBackend = "NVIDIA NVML";
+                    return;
+                } else {
+                    pfn_nvmlShutdown();
+                }
             }
         }
-    } else {
         FreeLibrary(m_nvmlLib);
         m_nvmlLib = nullptr;
+    }
+
+    // DXGI Fallback for AMD / Intel / generic GPUs
+    if (SUCCEEDED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void**)&m_dxgiFactory))) {
+        IDXGIAdapter1* pAdapter = nullptr;
+        for (UINT i = 0; m_dxgiFactory->EnumAdapters1(i, &pAdapter) != DXGI_ERROR_NOT_FOUND; ++i) {
+            DXGI_ADAPTER_DESC1 desc;
+            if (SUCCEEDED(pAdapter->GetDesc1(&desc))) {
+                if ((desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) && i > 0) {
+                    pAdapter->Release();
+                    continue;
+                }
+
+                m_gpuModel = QString::fromWCharArray(desc.Description).trimmed();
+                m_gpuVramTotal = desc.DedicatedVideoMemory / (1024.0 * 1024.0 * 1024.0);
+                if (desc.VendorId == 0x1002) m_gpuBackend = "AMD Radeon (DXGI)";
+                else if (desc.VendorId == 0x8086) m_gpuBackend = "Intel Graphics (DXGI)";
+                else if (desc.VendorId == 0x10DE) m_gpuBackend = "NVIDIA (DXGI)";
+                else m_gpuBackend = "DirectX Hardware (DXGI)";
+
+                IDXGIAdapter3* pAdapter3 = nullptr;
+                if (SUCCEEDED(pAdapter->QueryInterface(__uuidof(IDXGIAdapter3), (void**)&pAdapter3))) {
+                    m_dxgiAdapter3 = pAdapter3;
+                    m_dxgiInitialized = true;
+                }
+                pAdapter->Release();
+                break;
+            }
+            pAdapter->Release();
+        }
     }
 }
 
@@ -189,61 +226,79 @@ void SystemMonitor::updateStats()
     // 4. Disk Speeds
     queryDiskSpeeds();
 
-    // 5. Disk Usage
+    // 5. Disk Usage (Multi-drive)
     queryDiskUsage();
 
     // 6. Network Speeds
     queryNetworkSpeeds();
 
-    // 7. System Uptime
+    // 7. Kernel & Memory Commit Metrics
+    queryPerformanceInfo();
+
+    // 8. System Uptime
     updateUptime();
 }
 
 void SystemMonitor::updateGpuStats()
 {
-    if (!m_nvmlInitialized || !m_nvmlDevice) {
+    if (m_nvmlInitialized && m_nvmlDevice) {
+        nvmlUtilization_t utilization;
+        if (pfn_nvmlDeviceGetUtilizationRates(m_nvmlDevice, &utilization) == NVML_SUCCESS) {
+            if (m_gpuUsage != utilization.device) {
+                m_gpuUsage = utilization.device;
+                emit gpuUsageChanged();
+            }
+        }
+
+        unsigned int temp = 0;
+        if (pfn_nvmlDeviceGetTemperature(m_nvmlDevice, NVML_TEMPERATURE_GPU, &temp) == NVML_SUCCESS) {
+            if (m_gpuTemp != temp) {
+                m_gpuTemp = temp;
+                emit gpuTempChanged();
+            }
+        }
+
+        nvmlMemory_t mem;
+        if (pfn_nvmlDeviceGetMemoryInfo(m_nvmlDevice, &mem) == NVML_SUCCESS) {
+            double totalVram = mem.total / (1024.0 * 1024.0 * 1024.0);
+            double usedVram = mem.used / (1024.0 * 1024.0 * 1024.0);
+            double vramUsagePercent = (static_cast<double>(mem.used) / mem.total) * 100.0;
+
+            if (m_gpuVramTotal != totalVram) {
+                m_gpuVramTotal = totalVram;
+                emit gpuVramTotalChanged();
+            }
+            if (m_gpuVramUsed != usedVram) {
+                m_gpuVramUsed = usedVram;
+                emit gpuVramUsedChanged();
+            }
+            if (m_gpuVramUsage != vramUsagePercent) {
+                m_gpuVramUsage = vramUsagePercent;
+                emit gpuVramUsageChanged();
+            }
+        }
+    } else if (m_dxgiInitialized && m_dxgiAdapter3) {
+        DXGI_QUERY_VIDEO_MEMORY_INFO memInfo;
+        if (SUCCEEDED(m_dxgiAdapter3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &memInfo))) {
+            double usedVram = memInfo.CurrentUsage / (1024.0 * 1024.0 * 1024.0);
+            double totalVram = m_gpuVramTotal;
+            double vramPct = (totalVram > 0.0) ? (usedVram / totalVram) * 100.0 : 0.0;
+
+            if (m_gpuVramUsed != usedVram) {
+                m_gpuVramUsed = usedVram;
+                emit gpuVramUsedChanged();
+            }
+            if (m_gpuVramUsage != vramPct) {
+                m_gpuVramUsage = vramPct;
+                emit gpuVramUsageChanged();
+            }
+        }
+    } else {
         m_gpuUsage = 0.0;
         m_gpuTemp = 0.0;
         m_gpuVramUsage = 0.0;
         m_gpuVramTotal = 0.0;
         m_gpuVramUsed = 0.0;
-        return;
-    }
-
-    nvmlUtilization_t utilization;
-    if (pfn_nvmlDeviceGetUtilizationRates(m_nvmlDevice, &utilization) == NVML_SUCCESS) {
-        if (m_gpuUsage != utilization.device) {
-            m_gpuUsage = utilization.device;
-            emit gpuUsageChanged();
-        }
-    }
-
-    unsigned int temp = 0;
-    if (pfn_nvmlDeviceGetTemperature(m_nvmlDevice, NVML_TEMPERATURE_GPU, &temp) == NVML_SUCCESS) {
-        if (m_gpuTemp != temp) {
-            m_gpuTemp = temp;
-            emit gpuTempChanged();
-        }
-    }
-
-    nvmlMemory_t mem;
-    if (pfn_nvmlDeviceGetMemoryInfo(m_nvmlDevice, &mem) == NVML_SUCCESS) {
-        double totalVram = mem.total / (1024.0 * 1024.0 * 1024.0);
-        double usedVram = mem.used / (1024.0 * 1024.0 * 1024.0);
-        double vramUsagePercent = (static_cast<double>(mem.used) / mem.total) * 100.0;
-
-        if (m_gpuVramTotal != totalVram) {
-            m_gpuVramTotal = totalVram;
-            emit gpuVramTotalChanged();
-        }
-        if (m_gpuVramUsed != usedVram) {
-            m_gpuVramUsed = usedVram;
-            emit gpuVramUsedChanged();
-        }
-        if (m_gpuVramUsage != vramUsagePercent) {
-            m_gpuVramUsage = vramUsagePercent;
-            emit gpuVramUsageChanged();
-        }
     }
 }
 
@@ -272,15 +327,104 @@ void SystemMonitor::queryDiskSpeeds()
 
 void SystemMonitor::queryDiskUsage()
 {
-    ULARGE_INTEGER freeBytesAvailable, totalNumberOfBytes, totalNumberOfFreeBytes;
-    if (GetDiskFreeSpaceExW(L"C:\\", &freeBytesAvailable, &totalNumberOfBytes, &totalNumberOfFreeBytes)) {
-        double totalGB = totalNumberOfBytes.QuadPart / (1024.0 * 1024.0 * 1024.0);
-        double freeGB = totalNumberOfFreeBytes.QuadPart / (1024.0 * 1024.0 * 1024.0);
+    DWORD drivesMask = GetLogicalDrives();
+    ULONGLONG totalAllBytes = 0;
+    ULONGLONG freeAllBytes = 0;
+    QStringList summaries;
+
+    for (int i = 0; i < 26; ++i) {
+        if (drivesMask & (1 << i)) {
+            wchar_t driveRoot[4] = { static_cast<wchar_t>(L'A' + i), L':', L'\\', L'\0' };
+            UINT driveType = GetDriveTypeW(driveRoot);
+            if (driveType == DRIVE_FIXED) {
+                ULARGE_INTEGER freeBytes, totalBytes, totalFreeBytes;
+                if (GetDiskFreeSpaceExW(driveRoot, &freeBytes, &totalBytes, &totalFreeBytes)) {
+                    totalAllBytes += totalBytes.QuadPart;
+                    freeAllBytes += totalFreeBytes.QuadPart;
+
+                    double driveTotalGB = totalBytes.QuadPart / (1024.0 * 1024.0 * 1024.0);
+                    double driveFreeGB = totalFreeBytes.QuadPart / (1024.0 * 1024.0 * 1024.0);
+                    double driveUsedPct = (driveTotalGB > 0.0) ? ((driveTotalGB - driveFreeGB) / driveTotalGB) * 100.0 : 0.0;
+
+                    summaries << QString("%1: %2% used (%3/%4 GB)")
+                        .arg(QString(QChar('A' + i)))
+                        .arg(QString::number(driveUsedPct, 'f', 0))
+                        .arg(QString::number(driveTotalGB - driveFreeGB, 'f', 0))
+                        .arg(QString::number(driveTotalGB, 'f', 0));
+                }
+            }
+        }
+    }
+
+    if (totalAllBytes > 0) {
+        double totalGB = totalAllBytes / (1024.0 * 1024.0 * 1024.0);
+        double freeGB = freeAllBytes / (1024.0 * 1024.0 * 1024.0);
         double usedPercent = ((totalGB - freeGB) / totalGB) * 100.0;
+
+        bool changed = false;
+        if (m_diskTotalCapacityGB != totalGB) {
+            m_diskTotalCapacityGB = totalGB;
+            changed = true;
+        }
+        if (m_diskTotalFreeGB != freeGB) {
+            m_diskTotalFreeGB = freeGB;
+            changed = true;
+        }
         if (m_diskUsage != usedPercent) {
             m_diskUsage = usedPercent;
+            changed = true;
+        }
+        QString summaryStr = summaries.join(" • ");
+        if (m_diskDriveSummary != summaryStr) {
+            m_diskDriveSummary = summaryStr;
+            changed = true;
+        }
+        if (changed) {
             emit diskUsageChanged();
         }
+    }
+}
+
+void SystemMonitor::queryPerformanceInfo()
+{
+    PERFORMANCE_INFORMATION pi;
+    pi.cb = sizeof(PERFORMANCE_INFORMATION);
+    if (GetPerformanceInfo(&pi, sizeof(pi))) {
+        double pageSizeMB = static_cast<double>(pi.PageSize) / (1024.0 * 1024.0);
+        double commitTotal = (pi.CommitTotal * pageSizeMB) / 1024.0; // GB
+        double commitLimit = (pi.CommitLimit * pageSizeMB) / 1024.0; // GB
+        double commitPeak = (pi.CommitPeak * pageSizeMB) / 1024.0;   // GB
+        double commitPct = (commitLimit > 0.0) ? (commitTotal / commitLimit) * 100.0 : 0.0;
+
+        double pagedMB = pi.KernelPaged * pageSizeMB;
+        double nonpagedMB = pi.KernelNonpaged * pageSizeMB;
+
+        bool commitChanged = false;
+        if (m_commitTotalGB != commitTotal || m_commitLimitGB != commitLimit ||
+            m_commitUsagePercent != commitPct || m_commitPeakGB != commitPeak ||
+            m_kernelPagedMB != pagedMB || m_kernelNonpagedMB != nonpagedMB) {
+            m_commitTotalGB = commitTotal;
+            m_commitLimitGB = commitLimit;
+            m_commitUsagePercent = commitPct;
+            m_commitPeakGB = commitPeak;
+            m_kernelPagedMB = pagedMB;
+            m_kernelNonpagedMB = nonpagedMB;
+            commitChanged = true;
+        }
+
+        bool countsChanged = false;
+        int procs = static_cast<int>(pi.ProcessCount);
+        int threads = static_cast<int>(pi.ThreadCount);
+        int handles = static_cast<int>(pi.HandleCount);
+        if (m_processCount != procs || m_threadCount != threads || m_handleCount != handles) {
+            m_processCount = procs;
+            m_threadCount = threads;
+            m_handleCount = handles;
+            countsChanged = true;
+        }
+
+        if (commitChanged) emit commitStatsChanged();
+        if (countsChanged) emit systemCountsChanged();
     }
 }
 
@@ -363,6 +507,11 @@ void SystemMonitor::queryCpuModel()
         if (RegQueryValueExW(hKey, L"ProcessorNameString", nullptr, nullptr, (LPBYTE)m_cpuName, &size) == ERROR_SUCCESS) {
             m_cpuModel = QString::fromWCharArray(m_cpuName).trimmed();
         }
+        DWORD mhz = 0;
+        DWORD sizeMhz = sizeof(mhz);
+        if (RegQueryValueExW(hKey, L"~MHz", nullptr, nullptr, (LPBYTE)&mhz, &sizeMhz) == ERROR_SUCCESS) {
+            m_cpuBaseClockMHz = static_cast<int>(mhz);
+        }
         RegCloseKey(hKey);
     }
 }
@@ -376,7 +525,10 @@ void SystemMonitor::queryGpuModel()
             return;
         }
     }
-    m_gpuModel = "Standard GPU Renderer";
+    // If not NVML, m_gpuModel was already set by DXGI enumeration in initGpuQuery()
+    if (m_gpuModel.isEmpty() || m_gpuModel == "Unknown GPU") {
+        m_gpuModel = "Standard GPU Renderer";
+    }
 }
 
 void SystemMonitor::queryMotherboardAndBios()

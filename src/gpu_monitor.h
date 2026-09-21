@@ -7,6 +7,8 @@
 #include <QTimer>
 #include <windows.h>
 
+#include <dxgi1_4.h>
+
 struct GpuProcessEntry {
     unsigned long pid;
     QString name;
@@ -61,6 +63,8 @@ class GpuMonitor : public QObject
     Q_OBJECT
 
     Q_PROPERTY(bool hasNvidiaGpu READ hasNvidiaGpu NOTIFY statsChanged)
+    Q_PROPERTY(bool hasGpu READ hasGpu NOTIFY statsChanged)
+    Q_PROPERTY(QString gpuBackend READ gpuBackend NOTIFY statsChanged)
     Q_PROPERTY(QString gpuName READ gpuName NOTIFY statsChanged)
     Q_PROPERTY(double gpuUsage READ gpuUsage NOTIFY statsChanged)
     Q_PROPERTY(double gpuTemp READ gpuTemp NOTIFY statsChanged)
@@ -80,6 +84,8 @@ public:
     ~GpuMonitor();
 
     bool hasNvidiaGpu() const { return m_hasNvidiaGpu; }
+    bool hasGpu() const { return m_hasNvidiaGpu || m_dxgiInitialized; }
+    QString gpuBackend() const { return m_gpuBackend; }
     QString gpuName() const { return m_gpuName; }
     double gpuUsage() const { return m_gpuUsage; }
     double gpuTemp() const { return m_gpuTemp; }
@@ -104,6 +110,7 @@ private slots:
 
 private:
     void initNvml();
+    void initDxgi();
     void queryGpuProcesses();
     QString decodeThrottleReasons(unsigned long long reasonsMask);
     QString getProcessName(unsigned long pid);
@@ -113,6 +120,11 @@ private:
     QTimer *m_timer = nullptr;
 
     bool m_hasNvidiaGpu = false;
+    bool m_dxgiInitialized = false;
+    IDXGIFactory1 *m_dxgiFactory = nullptr;
+    IDXGIAdapter3 *m_dxgiAdapter3 = nullptr;
+    QString m_gpuBackend = "Standard";
+
     QString m_gpuName = "Standard GPU";
     double m_gpuUsage = 0.0;
     double m_gpuTemp = 0.0;

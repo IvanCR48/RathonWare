@@ -19,7 +19,7 @@ Item {
             font.family: "Tahoma"
             font.pixelSize: 12
             color: window.colorTextSec
-            Layout.preferredWidth: 150
+            Layout.preferredWidth: 160
         }
 
         Text {
@@ -29,6 +29,7 @@ Item {
             font.bold: true
             color: window.colorTextMain
             Layout.fillWidth: true
+            wrapMode: Text.WordWrap
         }
     }
 
@@ -36,7 +37,7 @@ Item {
     ScrollView {
         anchors.fill: parent
         contentWidth: parent.width
-        contentHeight: contentColumn.implicitHeight
+        contentHeight: contentColumn.implicitHeight + 20
         clip: true
 
         ColumnLayout {
@@ -77,8 +78,9 @@ Item {
                     }
 
                     SpecRow { label: "Model Name:"; value: systemMonitor.cpuModel }
+                    SpecRow { label: "Nominal Base Clock:"; value: systemMonitor.cpuBaseClockMHz > 0 ? (systemMonitor.cpuBaseClockMHz / 1000.0).toFixed(2) + " GHz" : "N/A" }
                     SpecRow { label: "Architecture:"; value: "x86_64 (64-bit Desktop Platform)" }
-                    SpecRow { label: "Sensor Hook:"; value: "Active - Querying Windows GetSystemTimes" }
+                    SpecRow { label: "Sensor Hook:"; value: "Active - Querying Windows GetSystemTimes & NT Performance APIs" }
                 }
             }
 
@@ -116,7 +118,7 @@ Item {
 
                     SpecRow { label: "Model Name:"; value: systemMonitor.gpuModel }
                     SpecRow { label: "Dedicated VRAM:"; value: systemMonitor.gpuVramTotal > 0 ? systemMonitor.gpuVramTotal.toFixed(1) + " GB Dedicated Video Memory" : "Shared/Integrated Memory" }
-                    SpecRow { label: "Interface Driver:"; value: systemMonitor.gpuVramTotal > 0 ? "NVIDIA Management Library (NVML API)" : "DirectX Generic Graphics Engine" }
+                    SpecRow { label: "Interface Driver:"; value: systemMonitor.gpuBackend }
                 }
             }
 
@@ -158,6 +160,44 @@ Item {
                     SpecRow { label: "BIOS Firmware:"; value: systemMonitor.biosVersion }
                     SpecRow { label: "OS Environment:"; value: "Microsoft Windows Desktop Platform" }
                     SpecRow { label: "Platform Kernel:"; value: "Windows NT WDM kernel driver" }
+                }
+            }
+
+            // 4. Fixed Storage & Volumes Card
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: storageCol.implicitHeight + 30
+                color: window.colorCard
+                radius: 6
+                border.color: window.colorCardBorder
+                border.width: 1
+
+                ColumnLayout {
+                    id: storageCol
+                    anchors.fill: parent
+                    anchors.margins: 15
+                    spacing: 10
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Text {
+                            text: "Storage & Fixed Volumes"
+                            font.family: "Tahoma"
+                            font.pixelSize: 14
+                            font.bold: true
+                            color: "#008080"
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 1
+                        color: window.colorCardBorder
+                    }
+
+                    SpecRow { label: "Total Storage Capacity:"; value: systemMonitor.diskTotalCapacityGB > 0 ? systemMonitor.diskTotalCapacityGB.toFixed(1) + " GB (" + systemMonitor.diskTotalFreeGB.toFixed(1) + " GB Available)" : "Detecting Storage..." }
+                    SpecRow { label: "Mounted Volumes:"; value: systemMonitor.diskDriveSummary !== "" ? systemMonitor.diskDriveSummary : "Scanning local drives..." }
+                    SpecRow { label: "Performance Counters:"; value: "Active - Querying Windows PhysicalDisk Read/Write counters" }
                 }
             }
         }

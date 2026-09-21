@@ -63,7 +63,7 @@ qt_add_qml_module(RathonWare
 
 # Windows specific library linkings
 if(WIN32)
-    target_link_libraries(RathonWare PRIVATE pdh psapi iphlpapi rstrtmgr ole32 oleaut32 wbemuuid ws2_32)
+    target_link_libraries(RathonWare PRIVATE pdh psapi iphlpapi rstrtmgr ole32 oleaut32 wbemuuid ws2_32 dxgi)
 endif()
 
 target_link_libraries(RathonWare PRIVATE

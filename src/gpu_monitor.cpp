@@ -149,6 +149,9 @@ GpuMonitor::GpuMonitor(GpuProcessModel *processModel, QObject *parent)
     , m_processModel(processModel)
 {
     initNvml();
+    if (!m_hasNvidiaGpu) {
+        initDxgi();
+    }
     updateTelemetry();
 
     m_timer = new QTimer(this);
@@ -163,6 +166,14 @@ GpuMonitor::~GpuMonitor()
     }
     if (m_nvmlLib) {
         FreeLibrary(m_nvmlLib);
+    }
+    if (m_dxgiAdapter3) {
+        m_dxgiAdapter3->Release();
+        m_dxgiAdapter3 = nullptr;
+    }
+    if (m_dxgiFactory) {
+        m_dxgiFactory->Release();
+        m_dxgiFactory = nullptr;
     }
 }
 
@@ -201,6 +212,7 @@ void GpuMonitor::initNvml()
         if (pfn_nvmlInit() == NVML_SUCCESS) {
             if (pfn_nvmlDeviceGetHandleByIndex(0, &m_nvmlDevice) == NVML_SUCCESS) {
                 m_hasNvidiaGpu = true;
+                m_gpuBackend = "NVIDIA NVML";
                 char name[128] = {0};
                 if (pfn_nvmlDeviceGetName(m_nvmlDevice, name, sizeof(name)) == NVML_SUCCESS) {
                     m_gpuName = QString::fromUtf8(name);
@@ -208,6 +220,38 @@ void GpuMonitor::initNvml()
             } else {
                 pfn_nvmlShutdown();
             }
+        }
+    }
+}
+
+void GpuMonitor::initDxgi()
+{
+    if (SUCCEEDED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void**)&m_dxgiFactory))) {
+        IDXGIAdapter1* pAdapter = nullptr;
+        for (UINT i = 0; m_dxgiFactory->EnumAdapters1(i, &pAdapter) != DXGI_ERROR_NOT_FOUND; ++i) {
+            DXGI_ADAPTER_DESC1 desc;
+            if (SUCCEEDED(pAdapter->GetDesc1(&desc))) {
+                if ((desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) && i > 0) {
+                    pAdapter->Release();
+                    continue;
+                }
+
+                m_gpuName = QString::fromWCharArray(desc.Description).trimmed();
+                m_vramTotalGB = desc.DedicatedVideoMemory / (1024.0 * 1024.0 * 1024.0);
+                if (desc.VendorId == 0x1002) m_gpuBackend = "AMD Radeon (DXGI)";
+                else if (desc.VendorId == 0x8086) m_gpuBackend = "Intel Graphics (DXGI)";
+                else if (desc.VendorId == 0x10DE) m_gpuBackend = "NVIDIA (DXGI)";
+                else m_gpuBackend = "DirectX Hardware (DXGI)";
+
+                IDXGIAdapter3* pAdapter3 = nullptr;
+                if (SUCCEEDED(pAdapter->QueryInterface(__uuidof(IDXGIAdapter3), (void**)&pAdapter3))) {
+                    m_dxgiAdapter3 = pAdapter3;
+                    m_dxgiInitialized = true;
+                }
+                pAdapter->Release();
+                break;
+            }
+            pAdapter->Release();
         }
     }
 }
@@ -447,66 +491,80 @@ void GpuMonitor::queryGpuProcesses()
 
 void GpuMonitor::updateTelemetry()
 {
-    if (!m_hasNvidiaGpu || !m_nvmlDevice) return;
-
-    // 1. Utilization
-    nvmlUtilization_t util = {0, 0};
-    if (pfn_nvmlDeviceGetUtilizationRates(m_nvmlDevice, &util) == NVML_SUCCESS) {
-        m_gpuUsage = util.device;
-    }
-
-    // 2. Temperature
-    unsigned int temp = 0;
-    if (pfn_nvmlDeviceGetTemperature(m_nvmlDevice, NVML_TEMPERATURE_GPU, &temp) == NVML_SUCCESS) {
-        m_gpuTemp = temp;
-    }
-
-    // 3. VRAM
-    nvmlMemory_t mem = {0, 0, 0};
-    if (pfn_nvmlDeviceGetMemoryInfo(m_nvmlDevice, &mem) == NVML_SUCCESS) {
-        m_vramTotalGB = mem.total / (1024.0 * 1024.0 * 1024.0);
-        m_vramUsedGB = mem.used / (1024.0 * 1024.0 * 1024.0);
-        m_vramFreeGB = mem.free / (1024.0 * 1024.0 * 1024.0);
-        m_vramUsagePercent = (mem.total > 0) ? (static_cast<double>(mem.used) / mem.total) * 100.0 : 0.0;
-    }
-
-    // 4. Power
-    if (pfn_nvmlDeviceGetPowerUsage) {
-        unsigned int powerMW = 0;
-        if (pfn_nvmlDeviceGetPowerUsage(m_nvmlDevice, &powerMW) == NVML_SUCCESS) {
-            m_powerUsageW = powerMW / 1000.0;
+    if (m_hasNvidiaGpu && m_nvmlDevice) {
+        // 1. Utilization
+        nvmlUtilization_t util = {0, 0};
+        if (pfn_nvmlDeviceGetUtilizationRates(m_nvmlDevice, &util) == NVML_SUCCESS) {
+            m_gpuUsage = util.device;
         }
-    }
-    if (pfn_nvmlDeviceGetEnforcedPowerLimit) {
-        unsigned int limitMW = 0;
-        if (pfn_nvmlDeviceGetEnforcedPowerLimit(m_nvmlDevice, &limitMW) == NVML_SUCCESS) {
-            m_powerLimitW = limitMW / 1000.0;
+
+        // 2. Temperature
+        unsigned int temp = 0;
+        if (pfn_nvmlDeviceGetTemperature(m_nvmlDevice, NVML_TEMPERATURE_GPU, &temp) == NVML_SUCCESS) {
+            m_gpuTemp = temp;
         }
+
+        // 3. VRAM
+        nvmlMemory_t mem = {0, 0, 0};
+        if (pfn_nvmlDeviceGetMemoryInfo(m_nvmlDevice, &mem) == NVML_SUCCESS) {
+            m_vramTotalGB = mem.total / (1024.0 * 1024.0 * 1024.0);
+            m_vramUsedGB = mem.used / (1024.0 * 1024.0 * 1024.0);
+            m_vramFreeGB = mem.free / (1024.0 * 1024.0 * 1024.0);
+            m_vramUsagePercent = (mem.total > 0) ? (static_cast<double>(mem.used) / mem.total) * 100.0 : 0.0;
+        }
+
+        // 4. Power
+        if (pfn_nvmlDeviceGetPowerUsage) {
+            unsigned int powerMW = 0;
+            if (pfn_nvmlDeviceGetPowerUsage(m_nvmlDevice, &powerMW) == NVML_SUCCESS) {
+                m_powerUsageW = powerMW / 1000.0;
+            }
+        }
+        if (pfn_nvmlDeviceGetEnforcedPowerLimit) {
+            unsigned int limitMW = 0;
+            if (pfn_nvmlDeviceGetEnforcedPowerLimit(m_nvmlDevice, &limitMW) == NVML_SUCCESS) {
+                m_powerLimitW = limitMW / 1000.0;
+            }
+        }
+
+        // 5. Clocks
+        if (pfn_nvmlDeviceGetClockInfo) {
+            unsigned int clockMhz = 0;
+            if (pfn_nvmlDeviceGetClockInfo(m_nvmlDevice, NVML_CLOCK_GRAPHICS, &clockMhz) == NVML_SUCCESS) {
+                m_graphicsClockMHz = clockMhz;
+            }
+            if (pfn_nvmlDeviceGetClockInfo(m_nvmlDevice, NVML_CLOCK_MEM, &clockMhz) == NVML_SUCCESS) {
+                m_memoryClockMHz = clockMhz;
+            }
+        }
+
+        // 6. Throttle Reasons
+        if (pfn_nvmlDeviceGetCurrentClocksThrottleReasons) {
+            unsigned long long reasons = 0;
+            if (pfn_nvmlDeviceGetCurrentClocksThrottleReasons(m_nvmlDevice, &reasons) == NVML_SUCCESS) {
+                m_throttleReason = decodeThrottleReasons(reasons);
+            }
+        }
+
+        // 7. Per-process Breakdown
+        queryGpuProcesses();
+
+        emit statsChanged();
+        return;
     }
 
-    // 5. Clocks
-    if (pfn_nvmlDeviceGetClockInfo) {
-        unsigned int clockMhz = 0;
-        if (pfn_nvmlDeviceGetClockInfo(m_nvmlDevice, NVML_CLOCK_GRAPHICS, &clockMhz) == NVML_SUCCESS) {
-            m_graphicsClockMHz = clockMhz;
+    // DXGI fallback for AMD / Intel / generic GPUs
+    if (m_dxgiInitialized && m_dxgiAdapter3) {
+        DXGI_QUERY_VIDEO_MEMORY_INFO memInfo;
+        if (SUCCEEDED(m_dxgiAdapter3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &memInfo))) {
+            m_vramUsedGB = memInfo.CurrentUsage / (1024.0 * 1024.0 * 1024.0);
+            m_vramFreeGB = (m_vramTotalGB > m_vramUsedGB) ? (m_vramTotalGB - m_vramUsedGB) : 0.0;
+            m_vramUsagePercent = (m_vramTotalGB > 0) ? (m_vramUsedGB / m_vramTotalGB) * 100.0 : 0.0;
+            m_throttleReason = "Active DirectX Adapter (Telemetry via DXGI)";
+            m_throttleStatusLevel = "normal";
         }
-        if (pfn_nvmlDeviceGetClockInfo(m_nvmlDevice, NVML_CLOCK_MEM, &clockMhz) == NVML_SUCCESS) {
-            m_memoryClockMHz = clockMhz;
-        }
+        emit statsChanged();
     }
-
-    // 6. Throttle Reasons
-    if (pfn_nvmlDeviceGetCurrentClocksThrottleReasons) {
-        unsigned long long reasons = 0;
-        if (pfn_nvmlDeviceGetCurrentClocksThrottleReasons(m_nvmlDevice, &reasons) == NVML_SUCCESS) {
-            m_throttleReason = decodeThrottleReasons(reasons);
-        }
-    }
-
-    // 7. Per-process Breakdown
-    queryGpuProcesses();
-
-    emit statsChanged();
 }
 
 void GpuMonitor::refresh()
