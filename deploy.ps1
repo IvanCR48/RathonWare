@@ -67,6 +67,8 @@ if ($null -eq $Windeployqt) {
     Write-Host "Using windeployqt at: $Windeployqt" -ForegroundColor Green
     # Run windeployqt on the executable in dist folder
     & $Windeployqt --qmldir qml/ dist/RathonWare.exe
+    # Also deploy to build directory for local development testing
+    & $Windeployqt --qmldir qml/ $ExePath
 }
 
 # 4. Compile Installer using Inno Setup

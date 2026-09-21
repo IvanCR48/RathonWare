@@ -1,6 +1,7 @@
 # Qt Creator / CMake build directories
 build/
 build-*/
+dist/
 .qtcreator/
 *.user
 *.user.user
