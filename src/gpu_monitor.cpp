@@ -148,6 +148,8 @@ GpuMonitor::GpuMonitor(GpuProcessModel *processModel, QObject *parent)
     : QObject(parent)
     , m_processModel(processModel)
 {
+    // Attempt high-fidelity NVIDIA Management Library (NVML) telemetry first.
+    // If not an NVIDIA GPU (AMD Radeon, Intel Arc, or VM), cleanly fall back to DXGI 1.4.
     initNvml();
     if (!m_hasNvidiaGpu) {
         initDxgi();
@@ -177,6 +179,10 @@ GpuMonitor::~GpuMonitor()
     }
 }
 
+// Dynamically binds to nvml.dll located in System32 or driver store.
+// Why dynamic loading? If you link against nvml.lib statically, your executable instantly fails
+// to launch on any machine with an AMD Radeon or Intel Arc GPU (STATUS_DLL_NOT_FOUND 0xC0000135).
+// Late-binding gives us rock-solid portability across every PC.
 void GpuMonitor::initNvml()
 {
     m_nvmlLib = LoadLibraryW(L"nvml.dll");
@@ -194,7 +200,9 @@ void GpuMonitor::initNvml()
     pfn_nvmlDeviceGetClockInfo = (nvmlDeviceGetClockInfo_t)GetProcAddress(m_nvmlLib, "nvmlDeviceGetClockInfo");
     pfn_nvmlDeviceGetCurrentClocksThrottleReasons = (nvmlDeviceGetCurrentClocksThrottleReasons_t)GetProcAddress(m_nvmlLib, "nvmlDeviceGetCurrentClocksThrottleReasons");
     
-    // Try v3 first, then v2/v1 fallback
+    // NVIDIA driver API version dance:
+    // nvmlDeviceGetComputeRunningProcesses_v3 was introduced for modern multi-instance GPU architectures;
+    // fall back to v2/v1 on older drivers (e.g. GTX 10-series or legacy workstations).
     pfn_nvmlDeviceGetComputeRunningProcesses = (nvmlDeviceGetComputeRunningProcesses_t)GetProcAddress(m_nvmlLib, "nvmlDeviceGetComputeRunningProcesses_v3");
     if (!pfn_nvmlDeviceGetComputeRunningProcesses) {
         pfn_nvmlDeviceGetComputeRunningProcesses = (nvmlDeviceGetComputeRunningProcesses_t)GetProcAddress(m_nvmlLib, "nvmlDeviceGetComputeRunningProcesses");

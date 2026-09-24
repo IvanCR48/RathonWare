@@ -6,22 +6,28 @@
 #include <QTimer>
 #include <windows.h>
 
+// Individual logical core telemetry entry for the QML Heatmap Grid.
+// Intel 12th-14th Gen processors mix Performance Cores (P-Cores) with Efficiency Cores (E-Cores).
+// Windows Task Manager mixes them all together into tiny indistinct graphs without identifying which is which.
 struct CpuCoreEntry {
     int coreIndex;
     QString coreLabel;
-    QString coreType;     // "P-Core", "E-Core", or "Core"
+    QString coreType;     // "P-Core", "E-Core", or uniform "Core"
     bool isPCore;
     bool isECore;
-    double load;          // 0.0 - 100.0%
-    QString heatColor;    // Dynamic hex color code
+    double load;          // Instantaneous per-core load (0.0 - 100.0%)
+    QString heatColor;    // Hex gradient from cool blue (#2b6cb0) to thermal red (#c62828)
 };
 
+// Historical kernel/user time ticks per logical processor
 struct CoreTimeSample {
     LARGE_INTEGER idleTime;
     LARGE_INTEGER kernelTime;
     LARGE_INTEGER userTime;
 };
 
+// List model backing the real-time core heatmap grid in QML.
+// Emits fine-grained updates every 1000ms using low-overhead NT kernel queries.
 class CpuCoreModel : public QAbstractListModel
 {
     Q_OBJECT

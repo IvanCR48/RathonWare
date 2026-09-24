@@ -10,7 +10,10 @@
 #define NTDDI_VERSION 0x0A000000
 #endif
 
-// Prevent windows.h from including legacy winsock.h (Winsock 1)
+// Win32 Header Hell Workaround:
+// If windows.h is included before winsock2.h, it unconditionally includes legacy winsock.h (Winsock 1.1).
+// When iphlpapi.h or ws2tcpip.h is later pulled in, the compiler generates 100+ duplicate symbol errors.
+// WIN32_LEAN_AND_MEAN and explicit winsock2.h inclusion first is mandatory.
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -28,6 +31,9 @@
 #include <QTimer>
 #include <QString>
 
+// System-wide diagnostic monitor.
+// Aggregates real-time NT kernel stats, PDH disk counters, network interface deltas,
+// and physical memory commit charges into reactive Qt Q_PROPERTY bindings.
 class SystemMonitor : public QObject
 {
     Q_OBJECT

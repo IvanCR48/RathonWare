@@ -94,6 +94,13 @@ void SystemMonitor::initCpuQuery()
     GetSystemTimes(&m_prevIdleTime, &m_prevKernelTime, &m_prevUserTime);
 }
 
+// Low-overhead CPU percentage calculation using raw kernel ticks.
+// Why GetSystemTimes instead of PDH?
+// The Windows Performance Data Helper (PDH) CPU counter (\Processor(_Total)\% Processor Time)
+// requires initializing a query session that blocks for 1000ms before returning its first valid sample.
+// GetSystemTimes returns immediately with sub-millisecond precision.
+// Math: Total = (KernelTime - PrevKernel) + (UserTime - PrevUser).
+// KernelTime in Win32 includes IdleTime, so Idle must be subtracted from Total.
 double SystemMonitor::calculateCpuUsage()
 {
     FILETIME idleTime, kernelTime, userTime;
@@ -385,6 +392,13 @@ void SystemMonitor::queryDiskUsage()
     }
 }
 
+// Queries system-wide virtual memory commit charge and kernel pools.
+// Why Commit Charge matters:
+// Standard Task Manager shows "RAM: 60%" and developers assume everything is fine, while their app
+// suddenly crashes with std::bad_alloc or STATUS_COMMITMENT_LIMIT.
+// Commit Limit is the hard ceiling of Physical RAM + Pagefile size.
+// Tracking KernelPaged and KernelNonpaged is vital for catching leaking kernel-mode third-party drivers
+// (anti-cheat, antivirus, virtual disk drivers) that bypass userland process accounting.
 void SystemMonitor::queryPerformanceInfo()
 {
     PERFORMANCE_INFORMATION pi;
@@ -428,6 +442,9 @@ void SystemMonitor::queryPerformanceInfo()
     }
 }
 
+// Computes real-time network throughput delta across active physical adapters.
+// Filters out software loopbacks, WSL2 vEthernet bridges, and disconnected virtual interfaces
+// by checking row.Type (Ethernet or 802.11 Wi-Fi) and row.OperStatus == IfOperStatusUp.
 void SystemMonitor::queryNetworkSpeeds()
 {
     MIB_IF_TABLE2* pIfTable = nullptr;

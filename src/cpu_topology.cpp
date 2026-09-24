@@ -88,6 +88,11 @@ CpuTopology::CpuTopology(CpuCoreModel *coreModel, QObject *parent)
     : QObject(parent)
     , m_coreModel(coreModel)
 {
+    // Dynamically resolve ntdll!NtQuerySystemInformation.
+    // Querying per-core utilization through WMI or PDH takes between 1.5 to 3 seconds of initialization
+    // and causes visible UI stuttering in Qt Quick.
+    // NtQuerySystemInformation(SystemProcessorPerformanceInformation = 8) pulls the raw tick counts
+    // directly from kernel memory in less than 50 microseconds.
     HMODULE hNtDll = GetModuleHandleW(L"ntdll.dll");
     if (hNtDll) {
         NtQuerySystemInformation = (pfnNtQuerySystemInformation)GetProcAddress(hNtDll, "NtQuerySystemInformation");
@@ -105,6 +110,13 @@ CpuTopology::~CpuTopology()
 {
 }
 
+// Discovers physical and logical CPU layout, detecting Intel Alder Lake / Raptor Lake hybrid cores.
+// Uses GetLogicalProcessorInformationEx with RelationProcessorCore:
+// - On Windows 10 (21H2+) and Windows 11, Microsoft added EfficiencyClass to PROCESSOR_RELATIONSHIP.
+// - Due to MinGW / MSVC header alignment differences across SDK revisions, EfficiencyClass is reliably
+//   located at byte offset 1 of the Processor union.
+//   Value 0 = Gracemont/Crestmont Efficiency Core (E-Core).
+//   Value 1+ = Golden Cove/Raptor Cove Performance Core (P-Core).
 void CpuTopology::initTopology()
 {
     SYSTEM_INFO sysInfo;
@@ -157,7 +169,8 @@ void CpuTopology::initTopology()
             else m_eCoreCount++;
         }
     } else {
-        // Fallback for homogeneous processors: first half considered primary
+        // Fallback for homogeneous processors (AMD Ryzen, Threadripper, Intel 11th Gen and older).
+        // Since all cores are identical, we designate the first half as "primary" for affinity grouping.
         if (m_allCoresMask == 0) {
             m_allCoresMask = (m_totalCores >= 64) ? ~0ULL : ((1ULL << m_totalCores) - 1);
         }

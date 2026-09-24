@@ -9,24 +9,31 @@
 
 #include <dxgi1_4.h>
 
+// Process-level VRAM allocation record.
+// Standard Windows Task Manager groups all GPU memory together or reports confusing "Shared GPU Memory".
+// For developers running local LLMs (Ollama, vLLM, llama.cpp) or training scripts (PyTorch), this struct
+// captures dedicated device memory allocations, flags CUDA compute vs 3D graphics, and runs a heuristic
+// slope-detection pass to flag runaway VRAM memory leaks.
 struct GpuProcessEntry {
     unsigned long pid;
     QString name;
     QString category;      // "CUDA Compute / AI", "DirectX Graphics", etc.
     double vramMB;
     double vramGB;
-    double vramPercent;    // % of total VRAM
-    bool isCompute;
-    bool leakSuspected;
-    double growthRateMB;
+    double vramPercent;    // % of total dedicated VRAM
+    bool isCompute;        // True if running CUDA / TensorRT / OpenCL compute kernels
+    bool leakSuspected;    // Flagged by sliding-window growth rate heuristic
+    double growthRateMB;   // Rate of memory increase per minute
 };
 
+// Rolling buffer of historical VRAM allocation samples for leak detection
 struct VramHistoryEntry {
     QVector<double> samplesMB;
     ULONGLONG firstSeenTime;
     ULONGLONG lastSeenTime;
 };
 
+// List model backing the dedicated AI / GPU Telemetry table in QML
 class GpuProcessModel : public QAbstractListModel
 {
     Q_OBJECT
