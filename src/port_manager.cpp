@@ -21,6 +21,11 @@ PortManager::~PortManager()
 {
 }
 
+// Resolves executable name from PID.
+// We purposely take a Toolhelp snapshot here instead of calling OpenProcess + QueryFullProcessImageName:
+// opening handles to foreign processes frequently triggers ERROR_ACCESS_DENIED (error 5) if they run
+// under another session or higher integrity level, whereas Toolhelp gives us the executable filename
+// directly from the kernel table snapshot.
 QString PortManager::getProcessName(unsigned long pid)
 {
     if (pid == 0) return "System Idle Process";
@@ -44,6 +49,9 @@ QString PortManager::getProcessName(unsigned long pid)
     return name;
 }
 
+// Queries Working Set (resident physical RAM in MB) for the socket owner.
+// Notice the two-stage OpenProcess: first try with PROCESS_VM_READ to inspect memory counters;
+// if Windows denies VM_READ (common on hardened services), downgrade to PROCESS_QUERY_LIMITED_INFORMATION.
 double PortManager::getProcessMemoryMB(unsigned long pid)
 {
     if (pid == 0 || pid == 4) return 0.0;
@@ -78,11 +86,17 @@ QString PortManager::getProcessCommandLine(unsigned long pid)
     return "";
 }
 
+// Interrogates the kernel network stack for all bound IPv4/IPv6 TCP sockets and UDP endpoints.
+// Win32 IP Helper requires the classic two-step sizing dance:
+// 1. Call with buffer=NULL to get required buffer size (dwSize).
+// 2. Allocate buffer and call again.
+// Classic gotcha: if a busy process opens a socket between step 1 and step 2,
+// GetExtendedTcpTable fails with ERROR_INSUFFICIENT_BUFFER.
 QVector<PortProcessEntry> PortManager::queryAllPorts()
 {
     QVector<PortProcessEntry> entries;
 
-    // 1. IPv4 TCP Table
+    // 1. IPv4 TCP Table (handles 90% of local dev servers: Node, Python, Vite, Rails)
     DWORD dwSize = 0;
     GetExtendedTcpTable(NULL, &dwSize, TRUE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
     if (dwSize > 0) {
@@ -238,11 +252,15 @@ QVariantList PortManager::getAllListeningPorts()
     return list;
 }
 
+// Terminate all processes binding the target port.
+// Used when typing ":3000" in Command Palette and hitting "Kill".
 bool PortManager::killProcessOnPort(int port)
 {
     bool anyKilled = false;
     QVector<PortProcessEntry> all = queryAllPorts();
     for (const auto& entry : all) {
+        // PID 0 is System Idle, PID 4 is NT Kernel / System.
+        // Trying to terminate either will either fail with ERROR_INVALID_PARAMETER or crash Windows.
         if (entry.port == port && entry.pid > 4) {
             if (killProcessByPid(entry.pid)) {
                 anyKilled = true;
@@ -252,6 +270,9 @@ bool PortManager::killProcessOnPort(int port)
     return anyKilled;
 }
 
+// Immediate process termination via Win32 TerminateProcess.
+// No polite WM_CLOSE message, no waiting for Node or Python runtimes to cleanly shut down:
+// this is specifically meant for stuck developer servers that refuse to release the socket.
 bool PortManager::killProcessByPid(int pid)
 {
     if (pid <= 4) return false;

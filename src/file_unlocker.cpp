@@ -21,6 +21,11 @@ FileUnlocker::~FileUnlocker()
 {
 }
 
+// Strips QML "file:///" prefixes and normalizes slashes to native Windows separators ('\').
+// When a user drags and drops a locked DLL or database from Windows Explorer into our QML DropArea,
+// Qt passes a URL like "file:///C:/Users/name/repo/build/app.exe".
+// The Win32 Restart Manager expects a raw win32 path (e.g., "C:\Users\name\repo\build\app.exe");
+// passing a URI triggers ERROR_FILE_NOT_FOUND or ERROR_INVALID_NAME.
 QString FileUnlocker::normalizePath(const QString& path)
 {
     QString clean = path;
@@ -89,6 +94,10 @@ QString FileUnlocker::getProcessCommandLine(unsigned long pid)
     return "";
 }
 
+// Interrogates the Windows Restart Manager API to identify all processes locking a file or directory.
+// Why Restart Manager? Because the alternative (enumerating all system handles with NtQuerySystemInformation
+// and calling DuplicateHandle + NtQueryObject) is notoriously hazardous: querying named pipes or hung device
+// drivers hangs the calling thread forever. Restart Manager is fast, kernel-assisted, and safe.
 QVariantList FileUnlocker::findLockingProcesses(const QString& filePath)
 {
     QVariantList results;
@@ -98,6 +107,7 @@ QVariantList FileUnlocker::findLockingProcesses(const QString& filePath)
     DWORD dwSession = 0;
     WCHAR szSessionKey[CCH_RM_SESSION_KEY + 1] = {0};
 
+    // Start a temporary Restart Manager session
     DWORD dwError = RmStartSession(&dwSession, 0, szSessionKey);
     if (dwError != ERROR_SUCCESS) {
         return results;
@@ -106,17 +116,21 @@ QVariantList FileUnlocker::findLockingProcesses(const QString& filePath)
     std::wstring wPath = nativePath.toStdWString();
     PCWSTR pszFile = wPath.c_str();
 
+    // Register the target file as a monitored resource
     dwError = RmRegisterResources(dwSession, 1, &pszFile, 0, NULL, 0, NULL);
     if (dwError == ERROR_SUCCESS) {
         UINT nProcInfoNeeded = 0;
         UINT nProcInfo = 0;
         DWORD dwRebootReasons = RmRebootReasonNone;
 
+        // First pass: determine how many processes are holding the file
         dwError = RmGetList(dwSession, &nProcInfoNeeded, &nProcInfo, NULL, &dwRebootReasons);
         if (dwError == ERROR_MORE_DATA && nProcInfoNeeded > 0) {
+            // Allocate exact array for holding processes
             std::vector<RM_PROCESS_INFO> rgProcesses(nProcInfoNeeded);
             nProcInfo = nProcInfoNeeded;
 
+            // Second pass: fill process details
             dwError = RmGetList(dwSession, &nProcInfoNeeded, &nProcInfo, rgProcesses.data(), &dwRebootReasons);
             if (dwError == ERROR_SUCCESS) {
                 for (UINT i = 0; i < nProcInfo; i++) {
@@ -127,6 +141,7 @@ QVariantList FileUnlocker::findLockingProcesses(const QString& filePath)
                     map["pid"] = static_cast<qlonglong>(pid);
                     map["name"] = getProcessName(pid);
                     map["appName"] = QString::fromWCharArray(info.strAppName);
+                    // Flag whether this is a background Windows Service (RmService) vs user desktop app
                     map["isService"] = (info.ApplicationType == RmService);
                     map["ramMB"] = getProcessMemoryMB(pid);
                     map["cmdLine"] = getProcessCommandLine(pid);
@@ -136,10 +151,13 @@ QVariantList FileUnlocker::findLockingProcesses(const QString& filePath)
         }
     }
 
+    // Always clean up session resources
     RmEndSession(dwSession);
     return results;
 }
 
+// 1-Click action: terminate all locking processes holding the target file.
+// Used from the File Unlocker Dialog or Command Palette.
 bool FileUnlocker::unlockFile(const QString& filePath)
 {
     QVariantList lockers = findLockingProcesses(filePath);
@@ -149,6 +167,7 @@ bool FileUnlocker::unlockFile(const QString& filePath)
     for (const QVariant& item : lockers) {
         QVariantMap map = item.toMap();
         int pid = map["pid"].toInt();
+        // Guard against touching PID <= 4
         if (pid > 4) {
             if (!killLockingProcess(pid)) {
                 allKilled = false;
@@ -158,6 +177,7 @@ bool FileUnlocker::unlockFile(const QString& filePath)
     return allKilled;
 }
 
+// Forcibly kills the holding process by PID.
 bool FileUnlocker::killLockingProcess(int pid)
 {
     if (pid <= 4) return false;
