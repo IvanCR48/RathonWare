@@ -61,7 +61,9 @@ qt_add_qml_module(RathonWare
         assets/logo.png
 )
 
-# Windows specific library linkings
+# Windows specific system library linkings.
+# Note: nvml is intentionally NOT linked statically here. It is loaded dynamically at runtime
+# via LoadLibraryW("nvml.dll") so RathonWare can launch cleanly on AMD Radeon and Intel Arc machines.
 if(WIN32)
     target_link_libraries(RathonWare PRIVATE pdh psapi iphlpapi rstrtmgr ole32 oleaut32 wbemuuid ws2_32 dxgi)
 endif()

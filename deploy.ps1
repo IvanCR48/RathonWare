@@ -1,6 +1,9 @@
 # PowerShell deployment script for RathonWare
-# This script builds the application in Release mode, runs windeployqt to collect DLL dependencies,
-# and compiles the installer using Inno Setup (ISCC.exe) if installed.
+# Handles the release packaging workflow:
+# 1. Compiles the binary in Release mode with CMake.
+# 2. Runs windeployqt with mandatory '--qmldir qml/' (vital: omitting --qmldir causes silent
+#    missing-plugin crashes on fresh Windows machines when QML modules fail to load).
+# 3. Invokes Inno Setup (ISCC.exe) to create a single standalone setup executable.
 
 $ErrorActionPreference = "Stop"
 

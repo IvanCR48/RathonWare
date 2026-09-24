@@ -12,12 +12,17 @@
 
 int main(int argc, char *argv[])
 {
-    // Enable High DPI scaling
+    // Fix High DPI fractional scaling fuzziness on modern Windows displays (125%, 150%, 175%).
+    // Rounding policy ensures UI edges snap cleanly to physical device pixels.
     QGuiApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::Round);
 
     QGuiApplication app(argc, argv);
 
-    // Set Quick Controls style to "Basic" so custom QML contentItem & background delegates render without warnings
+    // Qt Quick Styling Gotcha:
+    // By default, Qt Quick Controls picks up the native "Windows" or "Fusion" platform style.
+    // Those styles override custom Item delegates and complain with QML console warnings whenever
+    // custom background or contentItem properties are bound.
+    // Setting style to "Basic" gives our custom retro Y2K theme 100% control over every pixel.
     QQuickStyle::setStyle("Basic");
 
     app.setWindowIcon(QIcon(":/RathonWare/assets/logo.png"));
@@ -26,7 +31,8 @@ int main(int argc, char *argv[])
 
     QQmlApplicationEngine engine;
 
-    // Instantiate backend controllers
+    // Composition Root: Instantiate C++20 Win32 backend controllers.
+    // Kept alive on the main thread stack for the lifetime of the application.
     SystemMonitor monitor;
     ProcessModel processModel;
     PortManager portManager;

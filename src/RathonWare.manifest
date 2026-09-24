@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- 
+  Why requireAdministrator?
+  RathonWare reads remote process PEB memory (command-line arguments), kills stuck processes,
+  freezes runaways via NtSuspendProcess, alters thread affinities across P-Cores/E-Cores, and
+  queries the Windows Restart Manager for system-locked files.
+  Without administrative elevation, OpenProcess and SetProcessInformation fail with ERROR_ACCESS_DENIED (error 5).
+-->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <assemblyIdentity version="1.0.0.0" processorArchitecture="*" name="RathonWare" type="win32"/>
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">

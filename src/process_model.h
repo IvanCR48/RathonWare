@@ -5,6 +5,10 @@
 #include <QTimer>
 #include "process_manager.h"
 
+// Reactive QAbstractListModel bridging Win32 ProcessManager into Qt Quick / QML.
+// Maps typed C++ fields directly to QML delegates via named roles to avoid JavaScript runtime reflection overhead.
+// Windows process tables have high PID churn (compilers spawning hundreds of cl.exe/gcc processes in seconds);
+// this model manages batch updates cleanly without blocking the QML rendering thread.
 class ProcessModel : public QAbstractListModel
 {
     Q_OBJECT
